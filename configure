@@ -223,7 +223,7 @@ elif [ "x$os" = "xDragonFly" ] ; then
 elif [ "x$os" = "xDarwin" ] ; then
     cflags="-O2 -pipe -std=c99"
 elif [ "x$os" = "xLinux" ] ; then
-    cflags="-O2 -pipe -std=c99 -D_GNU_SOURCE -DNEED_SYS_SIGNAME"
+    cflags="-O2 -pipe -std=c99 -D_GNU_SOURCE -D_BSD_SOURCE"
 elif [ "x$os" = "xSunOS" ] ; then
     if [ "x$CC" = "xgcc" ] ; then
 	cflags="-O2 -pipe -std=c99"

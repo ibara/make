@@ -20,6 +20,9 @@
 
 #include <sys/types.h>
 
+#include <stddef.h>
+#include <stdint.h>
+
 /* Open hashing support. 
  * Open hashing was chosen because it is much lighter than other hash
  * techniques, and more efficient in most cases.
