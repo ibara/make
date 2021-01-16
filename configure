@@ -1,4 +1,4 @@
-#/bin/sh
+#!/bin/sh
 # This configure script written by Brian Callahan <bcallah@devio.us>
 # and released into the Public Domain.
 
