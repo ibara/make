@@ -1,9 +1,6 @@
-#ifndef MAIN_H
-#define MAIN_H
-/*	$OpenBSD: main.h,v 1.6 2020/01/13 14:51:50 espie Exp $ */
-
+/*	$OpenBSD: enginechoice.c,v 1.3 2021/03/04 09:34:30 espie Exp $ */
 /*
- * Copyright (c) 2001 Marc Espie.
+ * Copyright (c) 2020 Marc Espie.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +23,36 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* main
- *	User interface to make.
- */
-/* Main_ParseArgLine(string);
- *	Parse string as a line of arguments, and treats them as if they
- *	were given at make's invocation. Used to implement .MFLAGS. */
-extern void Main_ParseArgLine(const char *);
+#include "config.h"
+#include "defines.h"
+#include "compat.h"
+#include "make.h"
+#include "enginechoice.h"
 
-/* List of target names given on the command line. Needed to resolve
- * .if make(...) statements. */
-extern Lst	create;
+struct engine {
+	void (*run_list)(Lst, bool *, bool *);
+	void (*node_updated)(GNode *);
+	void (*init)(void);
+} 
+	compat_engine = { Compat_Run, Compat_Update, Compat_Init }, 
+	parallel_engine = { Make_Run, Make_Update, Make_Init }, 
+	*engine;
 
-/* set_notparallel(): used to influence running mode from parse.c */
-extern void set_notparallel(void);
+void
+choose_engine(bool compat)
+{
+	engine = compat ? &compat_engine: &parallel_engine;
+	engine->init();
+}
 
-#endif
+void
+engine_run_list(Lst l, bool *has_errors, bool *out_of_date)
+{
+	engine->run_list(l, has_errors, out_of_date);
+}
+
+void
+engine_node_updated(GNode *gn)
+{
+	engine->node_updated(gn);
+}

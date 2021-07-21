@@ -1,4 +1,4 @@
-/*	$OpenBSD: job.c,v 1.139 2017/01/21 12:35:40 natano Exp $	*/
+/*	$OpenBSD: job.c,v 1.162 2020/06/02 12:24:44 espie Exp $	*/
 /*	$NetBSD: job.c,v 1.16 1996/11/06 17:59:08 christos Exp $	*/
 
 /*
@@ -70,18 +70,10 @@
  *
  *	Job_Init		Called to initialize this module. 
  *
- *	Job_Begin		execute commands attached to the .BEGIN target
- *				if any.
- *
  *	can_start_job		Return true if we can start job
  *
  *	Job_Empty		Return true if the job table is completely
  *				empty.
- *
- *	Job_Finish		Perform any final processing which needs doing.
- *				This includes the execution of any commands
- *				which have been/were attached to the .END
- *				target. 
  *
  *	Job_AbortAll		Abort all current jobs. It doesn't
  *				handle output or do anything for the jobs,
@@ -95,6 +87,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <portable.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -113,43 +106,41 @@
 #include "lst.h"
 #include "gnode.h"
 #include "memory.h"
-#include "make.h"
 #include "buf.h"
+#include "enginechoice.h"
 
 static int	aborting = 0;	    /* why is the make aborting? */
 #define ABORT_ERROR	1	    /* Because of an error */
 #define ABORT_INTERRUPT 2	    /* Because it was interrupted */
 #define ABORT_WAIT	3	    /* Waiting for jobs to finish */
 
-static int	maxJobs;	/* The most children we can run at once */
-static int	nJobs;		/* Number of jobs already allocated */
 static bool	no_new_jobs;	/* Mark recursive shit so we shouldn't start
 				 * something else at the same time
 				 */
+bool sequential;
 Job *runningJobs;		/* Jobs currently running a process */
 Job *errorJobs;			/* Jobs in error at end */
+Job *availableJobs;		/* Pool of available jobs */
 static Job *heldJobs;		/* Jobs not running yet because of expensive */
 static pid_t mypid;		/* Used for printing debugging messages */
+static Job *extra_job;		/* Needed for .INTERRUPT */
 
 static volatile sig_atomic_t got_fatal;
 
 static volatile sig_atomic_t got_SIGINT, got_SIGHUP, got_SIGQUIT, got_SIGTERM, 
     got_SIGINFO;
 
-static sigset_t esigset, emptyset;
+static sigset_t sigset_, emptyset, origset;
 
 static void handle_fatal_signal(int);
 static void handle_siginfo(void);
-static void postprocess_job(Job *, bool);
-static Job *prepare_job(GNode *);
+static void postprocess_job(Job *);
 static void determine_job_next_step(Job *);
-static void remove_job(Job *, bool);
 static void may_continue_job(Job *);
-static void continue_job(Job *);
 static Job *reap_finished_job(pid_t);
 static bool reap_jobs(void);
+static void may_continue_heldback_jobs(void);
 
-static void loop_handle_running_jobs(void);
 static bool expensive_job(Job *);
 static bool expensive_command(const char *);
 static void setup_signal(int);
@@ -173,7 +164,6 @@ really_kill(Job *job, int signo)
 	if (getpgid(pid) != getpgrp()) {
 		if (killpg(pid, signo) == 0)
 			return "group got signal";
-		pid = -pid;
 	} else {
 		if (kill(pid, signo) == 0)
 			return "process got signal";
@@ -220,7 +210,7 @@ static const char *
 shortened_curdir(void)
 {
 	static BUFFER buf;
-	bool first = true;
+	static bool first = true;
 	if (first) {
 		Buf_Init(&buf, 0);
 		buf_addcurdir(&buf);
@@ -322,14 +312,18 @@ internal_print_errors()
 	dying = check_dying_signal();
 	if (dying)
 		quick_summary(dying);
+	/* Print errors grouped by file name. */
 	while (errorJobs != NULL) {
+		/* Select the first job. */
 		k = errorJobs;
 		errorJobs = NULL;
 		for (j = k; j != NULL; j = jnext) {
 			jnext = j->next;
 			if (j->location->fname == k->location->fname)
+				/* Print errors with the same filename. */
 				print_error(j);
 			else {
+				/* Keep others for the next iteration. */
 				j->next = errorJobs;
 				errorJobs = j;
 			}
@@ -349,7 +343,7 @@ setup_signal(int sig)
 {
 	if (signal(sig, SIG_IGN) != SIG_IGN) {
 		(void)signal(sig, notice_signal);
-		sigaddset(&esigset, sig);
+               sigaddset(&sigset_, sig);
 	}
 }
 
@@ -382,11 +376,17 @@ notice_signal(int sig)
 	}
 }
 
+void
+Sigset_Init()
+{
+	sigemptyset(&emptyset);
+	sigprocmask(SIG_BLOCK, &emptyset, &origset);
+}
+
 static void
 setup_all_signals(void)
 {
-	sigemptyset(&esigset);
-	sigemptyset(&emptyset);
+       sigemptyset(&sigset_);
 	/*
 	 * Catch the four signals that POSIX specifies if they aren't ignored.
 	 * handle_signal will take care of calling JobInterrupt if appropriate.
@@ -528,21 +528,26 @@ debug_kill_printf(const char *fmt, ...)
 /*ARGSUSED*/
 
 static void
-postprocess_job(Job *job, bool okay)
+postprocess_job(Job *job)
 {
-	if (okay &&
+	if (job->exit_type == JOB_EXIT_OKAY &&
 	    aborting != ABORT_ERROR &&
 	    aborting != ABORT_INTERRUPT) {
 		/* As long as we aren't aborting and the job didn't return a
 		 * non-zero status that we shouldn't ignore, we call
 		 * Make_Update to update the parents. */
-		job->node->built_status = MADE;
-		Make_Update(job->node);
-		free(job);
+		job->node->built_status = REBUILT;
+		engine_node_updated(job->node);
+	}
+	if (job->flags & JOB_KEEPERROR) {
+		job->next = errorJobs;
+		errorJobs = job;
+	} else {
+		job->next = availableJobs;
+		availableJobs = job;
 	}
 
-	if (errorJobs != NULL && !keepgoing &&
-	    aborting != ABORT_INTERRUPT)
+	if (errorJobs != NULL && aborting != ABORT_INTERRUPT)
 		aborting = ABORT_ERROR;
 
 	if (aborting == ABORT_ERROR && DEBUG(QUICKDEATH))
@@ -564,10 +569,10 @@ postprocess_job(Job *job, bool okay)
  * is set, so jobs that would fork new processes are accumulated in the
  * heldJobs list instead.
  *
- * This heuristics is also used on error exit: we display silent commands
- * that failed, unless those ARE expensive commands: expensive commands
- * are likely to not be failing by themselves, but to be the result of
- * a cascade of failures in descendant makes.
+ * XXX This heuristics is also used on error exit: we display silent commands
+ * that failed, unless those ARE expensive commands: expensive commands are
+ * likely to not be failing by themselves, but to be the result of a cascade of
+ * failures in descendant makes.
  */
 void
 determine_expensive_job(Job *job)
@@ -643,35 +648,6 @@ expensive_command(const char *s)
 	return false;
 }
 
-static Job *
-prepare_job(GNode *gn)
-{
-	/* a new job is prepared unless its commands are bogus (we don't
-	 * have anything for it), or if we're in touch mode.
-	 *
-	 * Note that even in noexec mode, some commands may still run
-	 * thanks to the +cmd construct.
-	 */
-	if (node_find_valid_commands(gn)) {
-		if (touchFlag) {
-			Job_Touch(gn);
-			return NULL;
-		} else {
-			Job *job;       	
-
-			job = emalloc(sizeof(Job));
-			if (job == NULL)
-				Punt("can't create job: out of memory");
-
-			job_attach_node(job, gn);
-			return job;
-		}
-	} else {
-		node_failure(gn);
-		return NULL;
-	}
-}
-
 static void
 may_continue_job(Job *job)
 {
@@ -681,18 +657,29 @@ may_continue_job(Job *job)
 			    (long)mypid, job->node->name);
 		job->next = heldJobs;
 		heldJobs = job;
-	} else
-		continue_job(job);
+	} else {
+		bool finished = job_run_next(job);
+		if (finished)
+			postprocess_job(job);
+		else if (!sequential)
+			determine_expensive_job(job);
+	}
 }
 
 static void
-continue_job(Job *job)
+may_continue_heldback_jobs()
 {
-	bool finished = job_run_next(job);
-	if (finished)
-		remove_job(job, true);
-	else
-		determine_expensive_job(job);
+	while (!no_new_jobs) {
+		if (heldJobs != NULL) {
+			Job *job = heldJobs;
+			heldJobs = heldJobs->next;
+			if (DEBUG(EXPENSIVE))
+				fprintf(stderr, "[%ld] cheap -> release %s\n",
+				    (long)mypid, job->node->name);
+			may_continue_job(job);
+		} else
+			break;
+	}
 }
 
 /*-
@@ -709,19 +696,17 @@ continue_job(Job *job)
 void
 Job_Make(GNode *gn)
 {
-	Job *job;
+	Job *job = availableJobs;       	
 
-	job = prepare_job(gn);
-	if (!job)
-		return;
-	nJobs++;
+	assert(job != NULL);
+	availableJobs = availableJobs->next;
+	job_attach_node(job, gn);
 	may_continue_job(job);
 }
 
 static void
 determine_job_next_step(Job *job)
 {
-	bool okay;
 	if (job->flags & JOB_IS_EXPENSIVE) {
 		no_new_jobs = false;
 		if (DEBUG(EXPENSIVE))
@@ -731,29 +716,10 @@ determine_job_next_step(Job *job)
 			    job->node->name);
 	}
 
-	okay = job->exit_type == JOB_EXIT_OKAY;
-	if (!okay || job->next_cmd == NULL)
-		remove_job(job, okay);
+	if (job->exit_type != JOB_EXIT_OKAY || job->next_cmd == NULL)
+		postprocess_job(job);
 	else
 		may_continue_job(job);
-}
-
-static void
-remove_job(Job *job, bool okay)
-{
-	nJobs--;
-	postprocess_job(job, okay);
-	while (!no_new_jobs) {
-		if (heldJobs != NULL) {
-			job = heldJobs;
-			heldJobs = heldJobs->next;
-			if (DEBUG(EXPENSIVE))
-				fprintf(stderr, "[%ld] cheap -> release %s\n",
-				    (long)mypid, job->node->name);
-			continue_job(job);
-		} else
-			break;
-	}
 }
 
 /*
@@ -791,15 +757,19 @@ reap_jobs(void)
 	Job *job;
 
 	while ((pid = waitpid(WAIT_ANY, &status, WNOHANG)) > 0) {
+		if (WIFSTOPPED(status))
+			continue;
 		reaped = true;
 		job = reap_finished_job(pid);
 
 		if (job == NULL) {
-			Punt("Child (%ld) not in table?", (long)pid);
+			Punt("Child (%ld) with status %d not in table?", 
+			    (long)pid, status);
 		} else {
-			job_handle_status(job, status);
+			handle_job_status(job, status);
 			determine_job_next_step(job);
 		}
+		may_continue_heldback_jobs();
 	}
 	/* sanity check, should not happen */
 	if (pid == -1 && errno == ECHILD && runningJobs != NULL)
@@ -807,16 +777,21 @@ reap_jobs(void)
 	return reaped;
 }
 
+void 
+reset_signal_mask()
+{
+	sigprocmask(SIG_SETMASK, &origset, NULL);
+}
+
 void
 handle_running_jobs(void)
 {
-	sigset_t old;
 	/* reaping children in the presence of caught signals */
 
 	/* first, we make sure to hold on new signals, to synchronize
 	 * reception of new stuff on sigsuspend
 	 */
-	sigprocmask(SIG_BLOCK, &esigset, &old);
+       sigprocmask(SIG_BLOCK, &sigset_, NULL);
 	/* note this will NOT loop until runningJobs == NULL.
 	 * It's merely an optimisation, namely that we don't need to go 
 	 * through the logic if no job is present. As soon as a job 
@@ -835,30 +810,10 @@ handle_running_jobs(void)
 		 */
 		sigsuspend(&emptyset);
 	}
-	sigprocmask(SIG_SETMASK, &old, NULL);
+	reset_signal_mask();
 }
 
 void
-handle_one_job(Job *job)
-{
-	int stat;
-	int status;
-	sigset_t old;
-
-	sigprocmask(SIG_BLOCK, &esigset, &old);
-	while (1) {
-		handle_all_signals();
-		stat = waitpid(job->pid, &status, WNOHANG);
-		if (stat == job->pid)
-			break;
-		sigsuspend(&emptyset);
-	}
-	runningJobs = NULL;
-	job_handle_status(job, status);
-	sigprocmask(SIG_SETMASK, &old, NULL);
-}
-
-static void
 loop_handle_running_jobs()
 {
 	while (runningJobs != NULL)
@@ -866,15 +821,26 @@ loop_handle_running_jobs()
 }
 
 void
-Job_Init(int maxproc)
+Job_Init(int maxJobs)
 {
+	Job *j;
+	int i;
+
 	runningJobs = NULL;
 	heldJobs = NULL;
 	errorJobs = NULL;
-	maxJobs = maxproc;
-	mypid = getpid();
+	availableJobs = NULL;
+	sequential = maxJobs == 1;
 
-	nJobs = 0;
+	/* we allocate n+1 jobs, since we may need an extra job for
+	 * running .INTERRUPT.  */
+	j = ereallocarray(NULL, sizeof(Job), maxJobs+1);
+	for (i = 0; i != maxJobs; i++) {
+		j[i].next = availableJobs;
+		availableJobs = &j[i];
+	}
+	extra_job = &j[maxJobs];
+	mypid = getpid();
 
 	aborting = 0;
 	setup_all_signals();
@@ -883,7 +849,7 @@ Job_Init(int maxproc)
 bool
 can_start_job(void)
 {
-	if (aborting || nJobs >= maxJobs)
+	if (aborting || availableJobs == NULL)
 		return false;
 	else
 		return true;
@@ -923,7 +889,8 @@ handle_fatal_signal(int signo)
 	if (signo == SIGINT && !touchFlag) {
 		if ((interrupt_node->type & OP_DUMMY) == 0) {
 			ignoreErrors = false;
-
+			extra_job->next = availableJobs;
+			availableJobs = extra_job;
 			Job_Make(interrupt_node);
 		}
 	}
@@ -931,47 +898,13 @@ handle_fatal_signal(int signo)
 	internal_print_errors();
 
 	/* die by that signal */
-	sigprocmask(SIG_BLOCK, &esigset, NULL);
+       sigprocmask(SIG_BLOCK, &sigset_, NULL);
 	signal(signo, SIG_DFL);
 	kill(getpid(), signo);
 	sigprocmask(SIG_SETMASK, &emptyset, NULL);
 	/*NOTREACHED*/
 	fprintf(stderr, "This should never happen\n");
 	exit(1);
-}
-
-/*
- *-----------------------------------------------------------------------
- * Job_Finish --
- *	Do final processing such as the running of the commands
- *	attached to the .END target.
- *
- *	return true if fatal errors have happened.
- *-----------------------------------------------------------------------
- */
-bool
-Job_Finish(void)
-{
-	bool problem = errorJobs != NULL;
-
-	if ((end_node->type & OP_DUMMY) == 0) {
-		if (problem) {
-			Error("Errors reported so .END ignored");
-		} else {
-			Job_Make(end_node);
-			loop_handle_running_jobs();
-		}
-	}
-	return problem;
-}
-
-void
-Job_Begin(void)
-{
-	if ((begin_node->type & OP_DUMMY) == 0) {
-		Job_Make(begin_node);
-		loop_handle_running_jobs();
-	}
 }
 
 /*-
@@ -1013,8 +946,12 @@ Job_AbortAll(void)
 	aborting = ABORT_ERROR;
 
 	for (job = runningJobs; job != NULL; job = job->next) {
-		killpg(job->pid, SIGINT);
-		killpg(job->pid, SIGKILL);
+		debug_kill_printf("abort: send SIGINT to "
+		    "child %ld running %s: %s\n",
+		    (long)job->pid, job->node->name, really_kill(job, SIGINT));
+		debug_kill_printf("abort: send SIGKILL to "
+		    "child %ld running %s: %s\n",
+		    (long)job->pid, job->node->name, really_kill(job, SIGKILL));
 	}
 
 	/*

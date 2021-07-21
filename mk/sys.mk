@@ -1,4 +1,4 @@
-#	$OpenBSD: sys.mk,v 1.76 2016/05/26 20:13:44 zhuk Exp $
+#	$OpenBSD: sys.mk,v 1.89 2021/02/06 21:26:19 deraadt Exp $
 #	$NetBSD: sys.mk,v 1.27 1996/04/10 05:47:19 mycroft Exp $
 #	@(#)sys.mk	5.11 (Berkeley) 3/13/91
 
@@ -10,7 +10,7 @@
 
 unix=		We run OpenBSD.
 OSMAJOR=	6
-OSMINOR=	0
+OSMINOR=	9
 OSREV=		$(OSMAJOR).$(OSMINOR)
 OSrev=		$(OSMAJOR)$(OSMINOR)
 
@@ -185,16 +185,16 @@ CTAGS?=		/usr/bin/ctags
 
 # Lex
 .l:
-	${LEX.l} ${.IMPSRC}
-	${LINK.c} -o ${.TARGET} lex.yy.c ${LDLIBS} -ll
-	rm -f lex.yy.c
+	${LEX.l} -o lex.${.PREFIX}.c ${.IMPSRC}
+	${LINK.c} -o ${.TARGET} lex.${.PREFIX}.c ${LDLIBS} -ll
+	rm -f lex.${.PREFIX}.c
 .l.c:
-	${LEX.l} ${.IMPSRC}
-	mv lex.yy.c ${.TARGET}
+	${LEX.l} -o ${.TARGET} ${.IMPSRC}
 .l.o:
-	${LEX.l} ${.IMPSRC}
-	${COMPILE.c} -o ${.TARGET} lex.yy.c 
-	rm -f lex.yy.c
+	${LEX.l} -o lex.${.PREFIX}.c ${.IMPSRC}
+	${COMPILE.c} -o ${.TARGET} lex.${.PREFIX}.c
+	rm -f lex.${.PREFIX}.c
+	if test -f ${.TARGET:R}.d; then sed -i -e 's,lex.${.PREFIX}.c,${.IMPSRC},' ${.TARGET:R}.d; fi
 
 # Yacc
 .y:
@@ -208,6 +208,7 @@ CTAGS?=		/usr/bin/ctags
 	${YACC.y} ${.IMPSRC}
 	${COMPILE.c} -o ${.TARGET} y.tab.c
 	rm -f y.tab.c
+	if test -f ${.TARGET:R}.d; then sed -i -e 's,y.tab.c,${.IMPSRC},' ${.TARGET:R}.d; fi
 
 # Shell
 .sh:

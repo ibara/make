@@ -3,7 +3,11 @@
  * Please see each function for licensing details.
  */
 
+#include <stdint.h>
+#include "defines.h"
+#include "lst.h"
 #include "portable.h"
+
 
 /*
  * This minimal asprintf routine written by Brian Callahan <bcallah@devio.us>
@@ -19,25 +23,27 @@
 int
 asprintf(char **ret, const char *format, ...)
 {
-	int retval;
-	va_list ap;
+        int retval;
+        va_list ap;
 
-	va_start(ap, format);
+        va_start(ap, format);
 
-	if ((*ret = malloc(32)) == NULL) {
-		retval = -1;
-		goto out;
-	}
+        if ((*ret = malloc(32)) == NULL) {
+                retval = -1;
+                goto out;
+        }
 
-	retval = vsnprintf(*ret, 32, format, ap);
+        retval = vsnprintf(*ret, 32, format, ap);
 
 out:
-	va_end(ap);
+        va_end(ap);
 
-	return retval;
+        return retval;
 }
 
 #endif /* NEED_ASPRINTF */
+
+#ifdef NEED_REALLOCARRAY
 
 /*	$OpenBSD: reallocarray.c,v 1.3 2015/09/13 08:31:47 guenther Exp $	*/
 /*
@@ -56,16 +62,10 @@ out:
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifdef NEED_REALLOCARRAY
-
 #include <sys/types.h>
 #include <errno.h>
-#include <limits.h>
+#include <stdint.h>
 #include <stdlib.h>
-
-#ifndef SIZE_MAX
-#define SIZE_MAX ULONG_MAX
-#endif
 
 /*
  * This is sqrt(SIZE_MAX+1), as s1*s2 <= SIZE_MAX
@@ -85,11 +85,11 @@ reallocarray(void *optr, size_t nmemb, size_t size)
 }
 
 #endif /* NEED_REALLOCARRAY */
-
-/*	$OpenBSD: strlcpy.c,v 1.15 2016/10/16 17:37:39 dtucker Exp $	*/
+#ifdef NEED_STRLCPY
+/*	$OpenBSD: strlcpy.c,v 1.16 2019/01/25 00:19:25 millert Exp $	*/
 
 /*
- * Copyright (c) 1998, 2015 Todd C. Miller <Todd.Miller@courtesan.com>
+ * Copyright (c) 1998, 2015 Todd C. Miller <millert@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -103,8 +103,6 @@ reallocarray(void *optr, size_t nmemb, size_t size)
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#ifdef NEED_STRLCPY
 
 #include <sys/types.h>
 #include <string.h>
@@ -140,7 +138,7 @@ strlcpy(char *dst, const char *src, size_t dsize)
 }
 
 #endif /* NEED_STRLCPY */
-
+#ifdef NEED_STRTONUM
 /*	$OpenBSD: strtonum.c,v 1.8 2015/09/13 08:31:48 guenther Exp $	*/
 
 /*
@@ -159,8 +157,6 @@ strlcpy(char *dst, const char *src, size_t dsize)
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-
-#ifdef NEED_STRTONUM
 
 #include <errno.h>
 #include <limits.h>
@@ -210,7 +206,7 @@ strtonum(const char *numstr, long long minval, long long maxval,
 }
 
 #endif /* NEED_STRTONUM */
-
+#ifdef NEED_SYS_SIGNAME
 /*	$OpenBSD: signame.c,v 1.7 2015/09/19 04:02:21 guenther Exp $ */
 /*
  * Copyright (c) 1983 Regents of the University of California.
@@ -241,12 +237,10 @@ strtonum(const char *numstr, long long minval, long long maxval,
  * SUCH DAMAGE.
  */
 
-#ifdef NEED_SYS_SIGNAME
-
 #include <signal.h>
 #include <unistd.h>
 
-const char *const sys_signame[_NSIG] = {
+const char *const sys_signame[NSIG] = {
 	"Signal 0",
 	"HUP",		/* SIGHUP */
 	"INT",		/* SIGINT */
@@ -281,11 +275,11 @@ const char *const sys_signame[_NSIG] = {
 	"USR2",		/* SIGUSR2 */
 	"THR",		/* SIGTHR */
 };
+#if 0
 
+#endif
 #endif /* NEED_SYS_SIGNAME */
-
-/*	$NetBSD: fgetln.c,v 1.12 2015/10/09 14:42:40 christos Exp $	*/
-
+#ifdef NEED_FGETLN 
 /*
  * Copyright (c) 2015 Joerg Jung <jung@openbsd.org>
  *
@@ -303,54 +297,52 @@ const char *const sys_signame[_NSIG] = {
  */
 
 /*
- * portable fgetln() version
+ * portable fgetln() version, NOT reentrant
  */
 
-#ifdef NEED_FGETLN
-
-#include <stdlib.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
 
+#include "compat.h"
+
+
 char *
 fgetln(FILE *fp, size_t *len)
 {
-	static char *buf = NULL;
-	static size_t bufsz = 0;
-	size_t r = 0;
-	char *p;
-	int c, e;
+    static char *buf = NULL;
+    static size_t bufsz = 0;
+    size_t r = 0;
+    char *p;
+    int c, e;
 
-	if (!fp || !len) {
-		errno = EINVAL;
-		return NULL;
-	}
-	if (!buf) {
-		if (!(buf = calloc(1, BUFSIZ)))
-			return NULL;
-		bufsz = BUFSIZ;
-	}
-	while ((c = getc(fp)) != EOF) {
-		buf[r++] = c;
-		if (r == bufsz) {
-			/*
-			 * Original uses reallocarray() but we don't have it
-			 * in tools.
-			 */
-			if (!(p = realloc(buf, 2 * bufsz))) {
-				e = errno;
-				free(buf);
-				errno = e;
-				buf = NULL, bufsz = 0;
-				return NULL;
-			}
-			buf = p, bufsz = 2 * bufsz;
-		}
-		if (c == '\n')
-			break;
-	}
-	return (*len = r) ? buf : NULL;
+    if (!fp || !len) {
+        errno = EINVAL;
+        return NULL;
+    }
+    if (!buf) {
+        if (!(buf = calloc(1, BUFSIZ)))
+            return NULL;
+        bufsz = BUFSIZ;
+    }
+    while ((c = getc(fp)) != EOF) {
+        buf[r++] = c;
+        if (r == bufsz) {
+            if (!(p = reallocarray(buf, 2, bufsz))) {
+                e = errno;
+                free(buf);
+                errno = e;
+                buf = NULL, bufsz = 0;
+                return NULL;
+            }
+            buf = p, bufsz = 2 * bufsz;
+        }
+        if (c == '\n')
+            break;
+    }
+    return (*len = r) ? buf : NULL;
 }
-
 #endif /* NEED_FGETLN */
+#ifdef NEED_ARC4RANDOM_UNIFORM
+#endif /* NEED_ARC4RANDOM_UNIFORM */

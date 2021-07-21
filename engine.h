@@ -1,6 +1,6 @@
 #ifndef ENGINE_H
 #define ENGINE_H
-/*	$OpenBSD: engine.h,v 1.13 2012/12/07 15:08:03 espie Exp $	*/
+/*	$OpenBSD: engine.h,v 1.17 2020/01/13 15:12:58 espie Exp $	*/
 
 /*
  * Copyright (c) 1988, 1989, 1990 The Regents of the University of California.
@@ -86,7 +86,7 @@ extern int run_gnode(GNode *);
  *
  * Each job has several things associated with it:
  *	1) The process id of the child shell
- *	2) The graph node describing the target being made by this job
+ *	2) The graph node describing the target of this job
  *	3) State associated to latest command run
  *	5) A word of flags which determine how the module handles errors,
  *	   echoing, etc. for the job
@@ -96,26 +96,27 @@ extern int run_gnode(GNode *);
  * exceed the value of 'maxJobs', initialized by the Job_Init function.
  *
  * When a job is finished, the Make_Update function is called on each of the
- * parents of the node which was just remade. This takes care of the upward
+ * parents of the node which was just rebuilt. This takes care of the upward
  * traversal of the dependency graph.
  */
 struct Job_ {
 	struct Job_ 	*next;		/* singly linked list */
 	pid_t		pid;		/* Current command process id */
 	Location	*location;
-	int		exit_type;	/* last child exit or signal */
-#define JOB_EXIT_OKAY 0
-#define JOB_EXIT_BAD 1
-#define JOB_SIGNALED 2
 	int 		code;		/* exit status or signal code */
+	unsigned short	exit_type;	/* last child exit or signal */
+#define JOB_EXIT_OKAY 	0
+#define JOB_EXIT_BAD 	1
+#define JOB_SIGNALED 	2
+	unsigned short	flags;
+#define JOB_SILENT		0x001	/* Command was silent */
+#define JOB_IS_EXPENSIVE 	0x002
+#define JOB_LOST		0x004	/* sent signal to non-existing pid ? */
+#define JOB_ERRCHECK		0x008	/* command wants errcheck */
+#define JOB_KEEPERROR		0x010	/* should place job on error list */
 	LstNode		next_cmd;	/* Next command to run */
 	char		*cmd;		/* Last command run */
 	GNode		*node;	    	/* Target of this job */
-	unsigned short	flags;
-#define JOB_SILENT	0x001	/* Command was silent */
-#define JOB_IS_EXPENSIVE 0x002
-#define JOB_LOST	0x004	/* sent signal to non-existing pid ? */
-#define JOB_ERRCHECK	0x008	/* command wants errcheck */
 };
 
 /* Continuation-style running commands for the parallel engine */
@@ -131,10 +132,10 @@ extern void job_attach_node(Job *, GNode *);
  */
 extern bool job_run_next(Job *);
 
-/* job_handle_status(job, waitstatus):
+/* handle_job_status(job, waitstatus):
  *	process a wait return value corresponding to a job, display
  *	messages and set job status accordingly.
  */
-extern void job_handle_status(Job *, int);
+extern void handle_job_status(Job *, int);
 
 #endif

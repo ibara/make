@@ -1,4 +1,4 @@
-/*	$OpenBSD: suff.c,v 1.91 2016/10/21 16:12:38 espie Exp $ */
+/*	$OpenBSD: suff.c,v 1.102 2020/01/13 15:41:53 espie Exp $ */
 /*	$NetBSD: suff.c,v 1.13 1996/11/06 17:59:25 christos Exp $	*/
 
 /*
@@ -39,28 +39,9 @@
  * suff.c --
  *	Functions to maintain suffix lists and find implicit dependents
  *	using suffix transformation rules
- *
- * Interface:
- *	Suff_Init		Initialize all things to do with suffixes.
- *
- *	Suff_ClearSuffixes	Clear out all the suffixes.
- *
- *	Suff_AddSuffix		Add the passed string as another known suffix.
- *
- *	Suff_ParseAsTransform	Line might be a suffix line, check it.
- *				If it's not, return NULL. Otherwise, add
- *				another transformation to the suffix graph.
- *				Returns	GNode suitable for framing, I mean,
- *				tacking commands, attributes, etc. on.
- *
- *	Suff_FindDeps		Find implicit sources for and the location of
- *				a target based on its suffix. Returns the
- *				bottom-most node added to the graph or NULL
- *				if the target had no implicit sources.
  */
 
 #include <ctype.h>
-#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -70,9 +51,7 @@
 #include "config.h"
 #include "defines.h"
 #include "dir.h"
-#include "direxpand.h"
 #include "engine.h"
-#include "arch.h"
 #include "suff.h"
 #include "var.h"
 #include "targ.h"
@@ -81,9 +60,9 @@
 #include "lst.h"
 #include "memory.h"
 #include "gnode.h"
-#include "make.h"
 #include "stats.h"
 #include "dump.h"
+#include "expandchildren.h"
 
 /* XXX the suffixes hash is stored using a specific hash function, suitable
  * for looking up suffixes in reverse.
@@ -91,7 +70,7 @@
 static struct ohash suffixes;
 
 /* We remember the longest suffix, so we don't need to look beyond that.  */
-size_t maxLen;
+size_t maxLen = 0U;
 static LIST srclist;
 
 /* Transforms (.c.o) are stored in another hash, independently from suffixes.
@@ -172,7 +151,6 @@ static Suff *new_suffixi(const char *, const char *);
 static void reverse_hash_add_char(uint32_t *, const char *);
 static uint32_t reverse_hashi(const char *, const char **);
 static unsigned int reverse_slot(struct ohash *, const char *, const char **);
-static void clear_suffixes(void);
 static void record_possible_suffix(Suff *, GNode *, char *, Lst, Lst);
 static void record_possible_suffixes(GNode *, Lst, Lst);
 static Suff *find_suffix_as_suffix(Lst, const char *, const char *);
@@ -180,13 +158,10 @@ static Suff *add_suffixi(const char *, const char *);
 
 static void SuffInsert(Lst, Suff *);
 static void SuffAddSrc(void *, void *);
-static int SuffRemoveSrc(Lst);
+static bool SuffRemoveSrc(Lst);
 static void SuffAddLevel(Lst, Src *);
 static Src *SuffFindThem(Lst, Lst);
 static Src *SuffFindCmds(Src *, Lst);
-static void SuffExpandChildren(LstNode, GNode *);
-static void SuffExpandVarChildren(LstNode, GNode *, GNode *);
-static void SuffExpandWildChildren(LstNode, GNode *, GNode *);
 static bool SuffApplyTransform(GNode *, GNode *, Suff *, Suff *);
 static void SuffFindDeps(GNode *, Lst);
 static void SuffFindArchiveDeps(GNode *, Lst);
@@ -348,18 +323,11 @@ SuffInsert(Lst l, Suff *s)
 	}
 }
 
-/*-
- *-----------------------------------------------------------------------
- * Suff_ClearSuffixes --
- *	Nuke the list of suffixes but keep all transformation
- *	rules around.
- *
- * Side Effects:
- *	Current suffixes are reset
- *-----------------------------------------------------------------------
- */
-static void
-clear_suffixes(void)
+/* Suff_DisableAllSuffixes
+ *	mark all current suffixes as inactive, and reset precedence
+ *	computation.  */
+void
+Suff_DisableAllSuffixes(void)
 {
 	unsigned int i;
 	Suff *s;
@@ -370,12 +338,6 @@ clear_suffixes(void)
 
 	order = 0;
 	maxLen = 0;
-}
-
-void
-Suff_ClearSuffixes(void)
-{
-	clear_suffixes();
 }
 
 
@@ -488,6 +450,18 @@ find_best_suffix(const char *s, const char *e)
 	return best;
 }
 
+Lst
+find_best_path(const char *name)
+{
+	Suff *s = find_best_suffix(name, name + strlen(name));
+	if (s != NULL) {
+		if (DEBUG(SUFF))
+			printf("suffix is \"%s\"...", s->name);
+		return &s->searchPath;
+	} else
+		return defaultPath;
+}
+
 /*-
  *-----------------------------------------------------------------------
  * Suff_ParseAsTransform --
@@ -523,7 +497,7 @@ Suff_ParseAsTransform(const char *line, const char *end)
 
 	gn->type = OP_TRANSFORM;
 	if (s->flags & SUFF_PATH) {
-		gn->special = SPECIAL_PATH | SPECIAL_TARGET;
+		gn->special = SPECIAL_PATH;
 		gn->suffix = t;
 	}
 
@@ -612,7 +586,7 @@ build_suffixes_graph(void)
 	    gn = ohash_next(&transforms, &i)) {
 	    	if (Lst_IsEmpty(&gn->commands) && Lst_IsEmpty(&gn->children))
 			continue;
-		if ((gn->special & SPECIAL_MASK) == SPECIAL_PATH)
+		if (gn->special == SPECIAL_PATH)
 			continue;
 	    	if (parse_transform(gn->name, &s, &s2)) {
 			SuffInsert(&s2->children, s);
@@ -629,11 +603,7 @@ build_suffixes_graph(void)
  *
  * Side Effects:
  *	The searchPath field of all the suffixes is extended by the
- *	directories in defaultPath. If paths were specified for the
- *	".h" suffix, the directories are stuffed into a global variable
- *	called ".INCLUDES" with each directory preceded by a -I. The same
- *	is done for the ".a" suffix, except the variable is called
- *	".LIBS" and the flag is -L.
+ *	directories in defaultPath. 
  *-----------------------------------------------------------------------
  */
 static void
@@ -730,21 +700,16 @@ SuffAddLevel(
 /*-
  *----------------------------------------------------------------------
  * SuffRemoveSrc --
- *	Free all src structures in list that don't have a reference count
+ *	Free Src structure with a zero reference count in a list
  *
- * Results:
- *	Ture if an src was removed
- *
- * Side Effects:
- *	The memory is free'd.
+ *	returns true if a src was removed
  *----------------------------------------------------------------------
  */
-static int
+static bool
 SuffRemoveSrc(Lst l)
 {
 	LstNode ln;
 	Src *s;
-	int t = 0;
 
 #ifdef DEBUG_SRC
 	printf("cleaning %lx: ", (unsigned long)l);
@@ -773,7 +738,6 @@ SuffRemoveSrc(Lst l)
 #endif
 			Lst_Remove(l, ln);
 			free(s);
-			t |= 1;
 			return true;
 		}
 #ifdef DEBUG_SRC
@@ -785,7 +749,7 @@ SuffRemoveSrc(Lst l)
 #endif
 	}
 
-	return t;
+	return false;
 }
 
 /*-
@@ -918,203 +882,6 @@ SuffFindCmds(Src *targ, Lst slst)
 	return NULL;
 }
 
-static void
-SuffLinkParent(GNode *cgn, GNode *pgn)
-{
-	Lst_AtEnd(&cgn->parents, pgn);
-	if (!has_been_built(cgn))
-		pgn->unmade++;
-	else if ( ! (cgn->type & (OP_EXEC|OP_USE))) {
-		if (cgn->built_status == MADE)
-			pgn->childMade = true;
-		(void)Make_TimeStamp(pgn, cgn);
-	}
-}
-
-static void
-SuffExpandVarChildren(LstNode after, GNode *cgn, GNode *pgn)
-{
-	GNode *gn;		/* New source 8) */
-	char *cp;		/* Expanded value */
-	LIST members;
-
-
-	if (DEBUG(SUFF))
-		printf("Expanding \"%s\"...", cgn->name);
-
-	cp = Var_Subst(cgn->name, &pgn->context, true);
-	if (cp == NULL) {
-		printf("Problem substituting in %s", cgn->name);
-		printf("\n");
-		return;
-	}
-
-	Lst_Init(&members);
-
-	if (cgn->type & OP_ARCHV) {
-		/*
-		 * Node was an archive(member) target, so we want to call
-		 * on the Arch module to find the nodes for us, expanding
-		 * variables in the parent's context.
-		 */
-		const char *sacrifice = (const char *)cp;
-
-		(void)Arch_ParseArchive(&sacrifice, &members, &pgn->context);
-	} else {
-		/* Break the result into a vector of strings whose nodes
-		 * we can find, then add those nodes to the members list.
-		 * Unfortunately, we can't use brk_string because it
-		 * doesn't understand about variable specifications with
-		 * spaces in them...  */
-		const char *start, *cp2;
-
-		for (start = cp; *start == ' ' || *start == '\t'; start++)
-			continue;
-		for (cp2 = start; *cp2 != '\0';) {
-			if (ISSPACE(*cp2)) {
-				/* White-space -- terminate element, find the
-				 * node, add it, skip any further spaces.  */
-				gn = Targ_FindNodei(start, cp2, TARG_CREATE);
-				cp2++;
-				Lst_AtEnd(&members, gn);
-				while (ISSPACE(*cp2))
-					cp2++;
-				/* Adjust cp2 for increment at start of loop,
-				 * but set start to first non-space.  */
-				start = cp2;
-			} else if (*cp2 == '$')
-				/* Start of a variable spec -- contact variable
-				 * module to find the end so we can skip over
-				 * it.  */
-				Var_ParseSkip(&cp2, &pgn->context);
-			else if (*cp2 == '\\' && cp2[1] != '\0')
-				/* Escaped something -- skip over it.  */
-				cp2+=2;
-			else
-				cp2++;
-	    }
-
-	    if (cp2 != start) {
-		    /* Stuff left over -- add it to the list too.  */
-		    gn = Targ_FindNodei(start, cp2, TARG_CREATE);
-		    Lst_AtEnd(&members, gn);
-	    }
-	}
-	/* Add all elements of the members list to the parent node.  */
-	while ((gn = Lst_DeQueue(&members)) != NULL) {
-		if (DEBUG(SUFF))
-			printf("%s...", gn->name);
-		if (Lst_Member(&pgn->children, gn) == NULL) {
-			Lst_Append(&pgn->children, after, gn);
-			after = Lst_Adv(after);
-			SuffLinkParent(gn, pgn);
-		}
-	}
-	/* Free the result.  */
-	free(cp);
-	if (DEBUG(SUFF))
-		printf("\n");
-}
-
-static void
-SuffExpandWildChildren(LstNode after, GNode *cgn, GNode *pgn)
-{
-	Suff *s;
-	char *cp;	/* Expanded value */
-
-	LIST exp;	/* List of expansions */
-	Lst path;	/* Search path along which to expand */
-
-	if (DEBUG(SUFF))
-		printf("Wildcard expanding \"%s\"...", cgn->name);
-
-	/* Find a path along which to expand the word.
-	 *
-	 * If the word has a known suffix, use that path.
-	 * If it has no known suffix and we're allowed to use the null
-	 *	 suffix, use its path.
-	 * Else use the default system search path.  */
-	s = find_best_suffix(cgn->name, cgn->name + strlen(cgn->name));
-
-	if (s != NULL) {
-		if (DEBUG(SUFF))
-			printf("suffix is \"%s\"...", s->name);
-		path = &s->searchPath;
-	} else
-		/* Use default search path.  */
-		path = defaultPath;
-
-	/* Expand the word along the chosen path. */
-	Lst_Init(&exp);
-	Dir_Expand(cgn->name, path, &exp);
-
-	/* Fetch next expansion off the list and find its GNode.  */
-	while ((cp = Lst_DeQueue(&exp)) != NULL) {
-		GNode *gn;		/* New source 8) */
-		if (DEBUG(SUFF))
-			printf("%s...", cp);
-		gn = Targ_FindNode(cp, TARG_CREATE);
-
-		/* If gn isn't already a child of the parent, make it so and
-		 * up the parent's count of unmade children.  */
-		if (Lst_Member(&pgn->children, gn) == NULL) {
-			Lst_Append(&pgn->children, after, gn);
-			after = Lst_Adv(after);
-			SuffLinkParent(gn, pgn);
-		}
-	}
-
-	if (DEBUG(SUFF))
-		printf("\n");
-}
-
-/*-
- *-----------------------------------------------------------------------
- * SuffExpandChildren --
- *	Expand the names of any children of a given node that contain
- *	variable invocations or file wildcards into actual targets.
- *
- * Side Effects:
- *	The expanded node is removed from the parent's list of children,
- *	and the parent's unmade counter is decremented, but other nodes
- *	may be added.
- *-----------------------------------------------------------------------
- */
-static void
-SuffExpandChildren(LstNode ln, /* LstNode of child, so we can replace it */
-    GNode *pgn)
-{
-	GNode	*cgn = Lst_Datum(ln);
-
-	/* First do variable expansion -- this takes precedence over wildcard
-	 * expansion. If the result contains wildcards, they'll be gotten to
-	 * later since the resulting words are tacked on to the end of the
-	 * children list.  */
-	if (strchr(cgn->name, '$') != NULL)
-		SuffExpandVarChildren(ln, cgn, pgn);
-	else if (Dir_HasWildcards(cgn->name))
-		SuffExpandWildChildren(ln, cgn, pgn);
-	else
-	    /* Third case: nothing to expand.  */
-		return;
-
-	/* Since the source was expanded, remove it from the list of children to
-	 * keep it from being processed.  */
-	pgn->unmade--;
-	Lst_Remove(&pgn->children, ln);
-}
-
-void
-expand_children_from(GNode *parent, LstNode from)
-{
-	LstNode np, ln;
-
-	for (ln = from; ln != NULL; ln = np) {
-		np = Lst_Adv(ln);
-		SuffExpandChildren(ln, parent);
-	}
-}
-
 /*-
  *-----------------------------------------------------------------------
  * SuffApplyTransform --
@@ -1146,7 +913,7 @@ SuffApplyTransform(
 	if (Lst_AddNew(&tGn->children, sGn)) {
 		/* Not already linked, so form the proper links between the
 		 * target and source.  */
-		SuffLinkParent(sGn, tGn);
+		LinkParent(sGn, tGn);
 	}
 
 	if ((sGn->type & OP_OPMASK) == OP_DOUBLEDEP) {
@@ -1160,7 +927,7 @@ SuffApplyTransform(
 			if (Lst_AddNew(&tGn->children, gn)) {
 				/* Not already linked, so form the proper links
 				 * between the target and source.  */
-				SuffLinkParent(gn, tGn);
+				LinkParent(gn, tGn);
 			}
 		}
 	}
@@ -1253,7 +1020,7 @@ SuffFindArchiveDeps(
 
 	/* Create the link between the two nodes right off. */
 	if (Lst_AddNew(&gn->children, mem))
-		SuffLinkParent(mem, gn);
+		LinkParent(mem, gn);
 
 	/* Copy variables from member node to this one.  */
 	Var(TARGET_INDEX, gn) = Var(TARGET_INDEX, mem);
@@ -1531,7 +1298,7 @@ sfnd_abort:
 			 * path to be the name so Dir_MTime won't go grovelling
 			 * for it.  */
 			gn->suffix = targ == NULL ? NULL : targ->suff;
-			efree(gn->path);
+			free(gn->path);
 			gn->path = estrdup(gn->name);
 		}
 
@@ -1565,8 +1332,8 @@ sfnd_abort:
 	 * each target are set from the commands of the transformation rule
 	 * used to get from the src suffix to the targ suffix. Note that this
 	 * causes the commands list of the original node, gn, to be replaced by
-	 * the commands of the final transformation rule. Also, the unmade
-	 * field of gn is incremented.  Etc.  */
+	 * the commands of the final transformation rule. Also, the children
+	 * to build field of gn is incremented.  Etc.  */
 	if (bottom->node == NULL) {
 		bottom->node = Targ_FindNode(bottom->file, TARG_CREATE);
 	}
@@ -1602,7 +1369,7 @@ sfnd_abort:
 	gn->suffix = src->suff;
 
 	/* So Dir_MTime doesn't go questing for it...  */
-	efree(gn->path);
+	free(gn->path);
 	gn->path = estrdup(gn->name);
 
 	/* Nuke the transformation path and the Src structures left over in the
@@ -1691,19 +1458,14 @@ Suff_Init(void)
 	Static_Lst_Init(&srclist);
 	ohash_init(&transforms, 4, &gnode_info);
 
-	/*
-	 * Create null suffix for single-suffix rules (POSIX). The thing doesn't
-	 * actually go on the suffix list or everyone will think that's its
-	 * suffix.
-	 */
+	/* Create null suffix for single-suffix rules (POSIX). The thing doesn't
+	 * actually go on the suffix list as it matches everything.  */
 	emptySuff = new_suffix("");
-	make_suffix_known(emptySuff);
+	emptySuff->flags = SUFF_ACTIVE;
+	emptySuff->order = 0;
 	Dir_Concat(&emptySuff->searchPath, defaultPath);
 	ohash_init(&suffixes, 4, &suff_info);
-	order = 0;
-	clear_suffixes();
 	special_path_hack();
-
 }
 
 

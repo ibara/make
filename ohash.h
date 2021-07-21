@@ -17,10 +17,6 @@
 
 #ifndef OHASH_H
 #define OHASH_H
-
-#include <sys/types.h>
-
-#include <stddef.h>
 #include <stdint.h>
 
 /* Open hashing support. 
@@ -60,8 +56,14 @@ void ohash_delete(struct ohash *);
 
 unsigned int ohash_lookup_interval(struct ohash *, const char *,
 	    const char *, uint32_t);
+#ifdef HAVE_BOUNDED
 unsigned int ohash_lookup_memory(struct ohash *, const char *,
-	    size_t, uint32_t);
+	    size_t, uint32_t)
+		__attribute__ ((__bounded__(__string__,2,3)));
+#else
+unsigned int ohash_lookup_memory(struct ohash *, const char *,
+           size_t, uint32_t);
+#endif /* HAVE_BOUNDED */
 void *ohash_find(struct ohash *, unsigned int);
 void *ohash_remove(struct ohash *, unsigned int);
 void *ohash_insert(struct ohash *, unsigned int, void *);

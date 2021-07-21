@@ -1,6 +1,4 @@
-#ifndef MAIN_H
-#define MAIN_H
-/*	$OpenBSD: main.h,v 1.6 2020/01/13 14:51:50 espie Exp $ */
+/*	$OpenBSD: lst_t.h,v 1.1 2014/05/12 19:11:20 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.
@@ -26,19 +24,10 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* main
- *	User interface to make.
- */
-/* Main_ParseArgLine(string);
- *	Parse string as a line of arguments, and treats them as if they
- *	were given at make's invocation. Used to implement .MFLAGS. */
-extern void Main_ParseArgLine(const char *);
 
-/* List of target names given on the command line. Needed to resolve
- * .if make(...) statements. */
-extern Lst	create;
+typedef struct	List_ {
+	LstNode 	firstPtr; /* first node in list */
+	LstNode 	lastPtr;  /* last node in list */
+} LIST;
 
-/* set_notparallel(): used to influence running mode from parse.c */
-extern void set_notparallel(void);
-
-#endif
+#define LIST_TYPE

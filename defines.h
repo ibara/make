@@ -30,8 +30,6 @@
 
 # include <stdbool.h>
 
-# include "portable.h"
-
 /* define common types in an opaque way */
 struct GNode_;
 typedef struct GNode_ GNode;

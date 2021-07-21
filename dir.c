@@ -70,6 +70,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ohash.h>
+#include <unistd.h>
 #include "config.h"
 #include "defines.h"
 #include "dir.h"

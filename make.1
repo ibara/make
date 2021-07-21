@@ -1,4 +1,4 @@
-.\"	$OpenBSD: make.1,v 1.124 2017/01/01 01:08:11 tb Exp $
+.\"	$OpenBSD: make.1,v 1.133 2021/03/08 06:20:50 jsg Exp $
 .\"	$NetBSD: make.1,v 1.18 1997/03/10 21:19:53 christos Exp $
 .\"
 .\" Copyright (c) 1990, 1993
@@ -30,7 +30,7 @@
 .\"
 .\"	from: @(#)make.1	8.4 (Berkeley) 3/19/94
 .\"
-.Dd $Mdocdate: January 1 2017 $
+.Dd $Mdocdate: March 8 2021 $
 .Dt MAKE 1
 .Os
 .Sh NAME
@@ -79,6 +79,17 @@ The handling of
 is a
 .Bx
 extension.
+.Pp
+If a list of
+.Ar target ...
+is specified,
+.Nm
+will build those targets.
+Otherwise a default target will be built:
+either a target explicitly marked with
+.Ic .MAIN
+or the first target encountered in the
+.Em makefile .
 .Pp
 Standard options are as follows:
 .Bl -tag -width Ds
@@ -209,7 +220,7 @@ is defined,
 will wait between 0 and ${RANDOM_DELAY} seconds before starting a command.
 A given random seed can be forced by setting
 .Va RANDOM_SEED ,
-but this does not guarantee reproductibility.
+but this does not guarantee reproducibility.
 .It Ar q
 .Sq quick death
 option: after a fatal error, instead of waiting for other jobs to die,
@@ -464,7 +475,7 @@ from sources a.c and b.c, with header file a.h:
 	${CC} ${CFLAGS} -c $<
 
 prog: a.o b.o
-	${CC} ${CFLAGS} -o $@ a.o
+	${CC} ${CFLAGS} -o $@ a.o b.o
 
 a.o b.o: a.h
 
@@ -511,8 +522,7 @@ They are also called
 in various texts.
 For portability, only periods, underscores, digits and letters should be
 used for variable names.
-The five operators that can be used to assign values to variables are as
-follows:
+The following operators can be used to assign values to variables:
 .Bl -tag -width Ds
 .It Ic \&=
 Assign the value to the variable.
@@ -575,6 +585,7 @@ Combinations that do not make sense, such as
 .Bd -literal -offset indent
 A +!!= cmd
 .Ed
+.Pp
 will not work.
 .Pp
 Variables are expanded by surrounding the variable name with either
@@ -1044,7 +1055,7 @@ in a context where it is not defined.
 .It Ic .poison empty Pq Ar variable
 It is an error to try to use the value of
 .Ar variable
-in a context where it is not defined or empty.
+in a context where it is not defined or is empty.
 .It Xo
 .Ic \&.if
 .Oo \&! Oc Ns Ar expression
@@ -1342,7 +1353,7 @@ recognizes standard special targets:
 .It Ic .DEFAULT
 If there is a
 .Ic .DEFAULT
-target rule, with commands but no prequisites, and
+target rule, with commands but no prerequisites, and
 .Nm
 can't figure out another way to build a target, it will use that
 list of commands, setting
@@ -1394,8 +1405,6 @@ Mark its prerequisites as
 Command lines attached to this target are executed if
 .Nm
 is interrupted by a SIGINT.
-.It Ic .MADE
-Mark its prerequisites as being up to date.
 .It Ic .MAKE
 Mark its prerequisites as
 .Dq Always build .
@@ -1495,8 +1504,7 @@ uses the following environment variables, if they exist:
 .Ev MACHINE_ARCH ,
 .Ev MACHINE_CPU ,
 .Ev MAKEFLAGS ,
-.Ev MAKEOBJDIR ,
-.Ev MAKEOBJDIRPREFIX ,
+.Ev MAKEOBJDIR
 and
 .Ev PWD .
 .Nm
@@ -1516,10 +1524,6 @@ does not exist
 system makefile
 .It Pa /usr/share/mk
 system makefile directory
-.It Pa /usr/obj
-default
-.Ev MAKEOBJDIRPREFIX
-directory
 .El
 .Sh EXIT STATUS
 If
@@ -1547,6 +1551,22 @@ utility exits with a value of 0 on success, and >0 if an error occurred.
 .Xr getcwd 3 ,
 .Xr uname 3 ,
 .Xr re_format 7
+.Rs
+.%A S. I. Feldman
+.%T Make \(em A Program for Maintaining Computer Programs
+.\".%R Computing Science Technical Report
+.\".%N 57
+.%J Software \(em Practice and Experience
+.%V 9:4
+.%P pp. 255-265
+.%D April 1979
+.Re
+.Rs
+.\" 4.4BSD PSD:12
+.%A Adam de Boor
+.%T PMake \(em A Tutorial
+.%B 4.4BSD Programmer's Supplementary Documents (PSD)
+.Re
 .Sh STANDARDS
 The
 .Nm

@@ -1,8 +1,6 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#include "portable.h"
-
 /*	$OpenBSD: config.h,v 1.20 2014/10/18 07:50:06 espie Exp $	*/
 /*	$NetBSD: config.h,v 1.7 1996/11/06 17:59:03 christos Exp $	*/
 

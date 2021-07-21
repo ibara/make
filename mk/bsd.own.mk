@@ -1,4 +1,4 @@
-#	$OpenBSD: bsd.own.mk,v 1.182 2016/12/18 17:02:21 patrick Exp $
+#	$OpenBSD: bsd.own.mk,v 1.210 2021/05/02 22:32:31 naddy Exp $
 #	$NetBSD: bsd.own.mk,v 1.24 1996/04/13 02:08:09 thorpej Exp $
 
 # Host-specific overrides
@@ -15,24 +15,54 @@ SKEY?=		yes
 # Set `YP' to `yes' to build with support for NIS/YP.
 YP?=		yes
 
-CLANG_ARCH=aarch64
+CLANG_ARCH=aarch64 amd64 arm i386 mips64 mips64el powerpc powerpc64 riscv64 sparc64
+GCC4_ARCH=alpha hppa sh sparc64
 GCC3_ARCH=m88k
+LLD_ARCH=aarch64 amd64 arm i386 powerpc64 riscv64
 
 # m88k: ?
-PIE_ARCH=alpha amd64 arm hppa i386 mips64 mips64el powerpc sh sparc64
-STATICPIE_ARCH=alpha amd64 arm hppa i386 mips64 mips64el powerpc sh sparc64
+PIE_ARCH=aarch64 alpha amd64 arm hppa i386 mips64 mips64el powerpc powerpc64 riscv64 sh sparc64
+STATICPIE_ARCH=aarch64 alpha amd64 arm hppa i386 mips64 mips64el powerpc powerpc64 riscv64 sh sparc64
 
 .for _arch in ${MACHINE_ARCH}
-.if !empty(CLANG_ARCH:M${_arch})
-COMPILER_VERSION?=clang
-.elif !empty(GCC3_ARCH:M${_arch})
+.if !empty(GCC3_ARCH:M${_arch})
 COMPILER_VERSION?=gcc3
-.else
+.elif !empty(GCC4_ARCH:M${_arch})
 COMPILER_VERSION?=gcc4
+.elif !empty(CLANG_ARCH:M${_arch})
+COMPILER_VERSION?=clang
+.endif
+
+.if !empty(GCC3_ARCH:M${_arch})
+BUILD_GCC3?=yes
+.else
+BUILD_GCC3?=no
+.endif
+.if !empty(GCC4_ARCH:M${_arch})
+BUILD_GCC4?=yes
+.else
+BUILD_GCC4?=no
+.endif
+.if !empty(CLANG_ARCH:M${_arch})
+BUILD_CLANG?=yes
+.else
+BUILD_CLANG?=no
+.endif
+
+.if !empty(LLD_ARCH:M${_arch})
+LINKER_VERSION?=lld
+.else
+LINKER_VERSION?=bfd
 .endif
 
 .if !empty(STATICPIE_ARCH:M${_arch})
 STATICPIE?=-pie
+.endif
+
+# Executables are always PIC on mips64.
+# Do not pass -fno-pie to the compiler because clang does not accept it.
+.if ${MACHINE_ARCH} == "mips64" || ${MACHINE_ARCH} == "mips64el"
+NOPIE_FLAGS?=
 .endif
 
 .if !empty(PIE_ARCH:M${_arch})
@@ -106,14 +136,11 @@ STATIC?=	-static ${STATICPIE}
 #SYS_INCLUDE= 	symlinks
 
 # pic relocation flags.
-.if (${MACHINE_ARCH} == "alpha") || (${MACHINE_ARCH} == "sparc64")
+.if ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "powerpc" || \
+    ${MACHINE_ARCH} == "sparc64"
 PICFLAG?=-fPIC
 .else
 PICFLAG?=-fpic
-.endif
-
-.if ${MACHINE_ARCH} == "sparc64"
-ASPICFLAG=-KPIC
 .endif
 
 .if ${MACHINE_ARCH} == "alpha" || ${MACHINE_ARCH} == "powerpc" || \

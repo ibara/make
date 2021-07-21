@@ -1,4 +1,4 @@
-/*	$OpenBSD: main.c,v 1.121 2016/10/21 16:12:38 espie Exp $ */
+/*	$OpenBSD: main.c,v 1.127 2020/01/13 15:41:53 espie Exp $ */
 /*	$NetBSD: main.c,v 1.34 1997/03/24 20:56:36 gwr Exp $	*/
 
 /*
@@ -41,6 +41,7 @@
 #include <sys/utsname.h>
 #include <err.h>
 #include <errno.h>
+#include <portable.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,15 +58,14 @@
 #include "pathnames.h"
 #include "init.h"
 #include "job.h"
-#include "compat.h"
 #include "targ.h"
 #include "suff.h"
 #include "str.h"
 #include "main.h"
 #include "lst.h"
 #include "memory.h"
-#include "make.h"
 #include "dump.h"
+#include "enginechoice.h"
 
 #define MAKEFLAGS	".MAKEFLAGS"
 
@@ -73,12 +73,12 @@ static LIST		to_create; 	/* Targets to be made */
 Lst create = &to_create;
 bool 		allPrecious;	/* .PRECIOUS given on line by itself */
 
-static bool		noBuiltins;	/* -r flag */
-static LIST		makefiles;	/* ordered list of makefiles to read */
-static LIST		varstoprint;	/* list of variables to print */
-int			maxJobs;	/* -j argument */
-bool 		compatMake;	/* -B argument */
-static bool		forceJobs = false;
+static bool	noBuiltins;	/* -r flag */
+static LIST	makefiles;	/* ordered list of makefiles to read */
+static LIST	varstoprint;	/* list of variables to print */
+static int	optj;		/* -j argument */
+static bool 	compatMake;	/* -B argument */
+static bool	forceJobs = false;
 int 		debug;		/* -d flag */
 bool 		noExecute;	/* -n flag */
 bool 		keepgoing;	/* -k flag */
@@ -124,6 +124,12 @@ record_option(int c, const char *arg)
 	Var_Append(MAKEFLAGS, opt);
 	if (arg != NULL)
 		Var_Append(MAKEFLAGS, arg);
+}
+
+void
+set_notparallel()
+{
+	compatMake = true;
 }
 
 static void
@@ -190,10 +196,8 @@ MainParseArgs(int argc, char **argv)
 #define OPTFLAGS "BC:D:I:SV:d:ef:ij:km:npqrst"
 #define OPTLETTERS "BSiknpqrst"
 
-#ifdef __OpenBSD__
 	if (pledge("stdio rpath wpath cpath fattr proc exec", NULL) == -1)
 		err(2, "pledge");
-#endif
 
 	optind = 1;	/* since we're called more than once */
 	optreset = 1;
@@ -312,14 +316,14 @@ MainParseArgs(int argc, char **argv)
 			Lst_AtEnd(&makefiles, optarg);
 			break;
 		case 'j': {
-		   char *endptr;
+			const char *errstr;
 
 			forceJobs = true;
-			maxJobs = strtol(optarg, &endptr, 0);
-			if (endptr == optarg) {
+			optj = strtonum(optarg, 1, INT_MAX, &errstr);
+			if (errstr != NULL) {
 				fprintf(stderr,
-					"make: illegal argument to -j option -- %s -- not a number\n",
-					optarg);
+				    "make: illegal argument to -j option"
+				    " -- %s -- %s\n", optarg, errstr);
 				usage();
 			}
 			record_option(c, optarg);
@@ -515,10 +519,10 @@ figure_out_CURDIR()
 	/* curdir is cwd... */
 	cwd = dogetcwd();
 	if (cwd == NULL)
-		err(2, "%s", strerror(errno));
+		err(2, "getcwd");
 
 	if (stat(cwd, &sa) == -1)
-		err(2, "%s: %s", cwd, strerror(errno));
+		err(2, "%s", cwd);
 
 	/* ...but we can use the alias $PWD if we can prove it is the same
 	 * directory */
@@ -625,30 +629,25 @@ read_all_make_rules(bool noBuiltins, bool read_depend,
 	Parse_End();
 }
 
+static void
+run_node(GNode *gn, bool *has_errors, bool *out_of_date)
+{
+	LIST l;
+
+	Lst_Init(&l);
+	Lst_AtEnd(&l, gn);
+	engine_run_list(&l, has_errors, out_of_date);
+	Lst_Destroy(&l, NOFREE);
+}
 
 int main(int, char **);
-/*-
- * main --
- *	The main function, for obvious reasons. Initializes variables
- *	and a few modules, then parses the arguments give it in the
- *	environment and on the command line. Reads the system makefile
- *	followed by either Makefile, makefile or the file given by the
- *	-f argument. Sets the .MAKEFLAGS PMake variable based on all the
- *	flags it has received by then uses either the Make or the Compat
- *	module to create the initial list of targets.
- *
- * Results:
- *	If -q was given, exits -1 if anything was out-of-date. Else it exits
- *	0.
- *
- * Side Effects:
- *	The program exits when done. Targets are created. etc. etc. etc.
- */
+
 int
 main(int argc, char **argv)
 {
 	static LIST targs;	/* target nodes to create */
-	bool outOfDate = true;	/* false if all targets up to date */
+	bool outOfDate = false;	/* false if all targets up to date */
+	bool errored = false;	/* true if errors occurred */
 	char *machine = figure_out_MACHINE();
 	char *machine_arch = figure_out_MACHINE_ARCH();
 	char *machine_cpu = figure_out_MACHINE_CPU();
@@ -667,6 +666,7 @@ main(int argc, char **argv)
 	Static_Lst_Init(&makefiles);
 	Static_Lst_Init(&varstoprint);
 	Static_Lst_Init(&targs);
+	Static_Lst_Init(&special);
 
 	beSilent = false;		/* Print commands as executed */
 	ignoreErrors = false;		/* Pay attention to non-zero returns */
@@ -678,7 +678,7 @@ main(int argc, char **argv)
 	touchFlag = false;		/* Actually update targets */
 	debug = 0;			/* No debug verbosity, please. */
 
-	maxJobs = DEFMAXJOBS;
+	optj = DEFMAXJOBS;
 	compatMake = false;		/* No compat mode */
 
 
@@ -759,6 +759,9 @@ main(int argc, char **argv)
 
 	read_all_make_rules(noBuiltins, read_depend, &makefiles, &d);
 
+	if (compatMake)
+		optj = 1;
+
 	Var_Append("MFLAGS", Var_Value(MAKEFLAGS));
 
 	/* Install all the flags into the MAKEFLAGS env variable. */
@@ -798,24 +801,26 @@ main(int argc, char **argv)
 		else
 			Targ_FindList(&targs, create);
 
-		Job_Init(maxJobs);
-		/* If the user has defined a .BEGIN target, execute the commands
-		 * attached to it.  */
-		if (!queryFlag)
-			Job_Begin();
-		if (compatMake)
-			/* Compat_Init will take care of creating all the
-			 * targets as well as initializing the module.  */
-			Compat_Run(&targs);
-		else {
-			/* Traverse the graph, checking on all the targets.  */
-			outOfDate = Make_Run(&targs);
-		}
+		choose_engine(compatMake);
+		Job_Init(optj);
+		if (!queryFlag && node_is_real(begin_node))
+			run_node(begin_node, &errored, &outOfDate);
+
+		if (!errored)
+			engine_run_list(&targs, &errored, &outOfDate);
+
+		if (!queryFlag && !errored && node_is_real(end_node))
+			run_node(end_node, &errored, &outOfDate);
 	}
 
 	/* print the graph now it's been processed if the user requested it */
 	if (DEBUG(GRAPH2))
 		post_mortem();
+
+	/* Note that we only hit this code if -k is used, otherwise we
+	 * exited early in case of errors. */
+	if (errored)
+		Fatal("Errors while building");
 
 	if (queryFlag && outOfDate)
 		return 1;

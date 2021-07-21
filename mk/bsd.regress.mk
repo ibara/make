@@ -1,4 +1,4 @@
-# $OpenBSD: bsd.regress.mk,v 1.13 2014/07/19 18:15:53 miod Exp $
+# $OpenBSD: bsd.regress.mk,v 1.23 2020/12/17 14:54:15 bluhm Exp $
 # Documented in bsd.regress.mk(5)
 
 # No man pages for regression tests.
@@ -17,27 +17,15 @@ NOPROG=
 .MAIN: all
 all: regress
 
-# Check for deprecated REGRESS* variables and assign them to the
-# new versions if the new version is not already defined. 
-_REGRESS_DEPRECATED=LOG:LOG SKIPTARGETS:SKIP_TARGETS SKIPSLOW:SKIP_SLOW \
-	SKIP:SKIP TARGETS:TARGETS MAXTIME:MAXTIME ROOTTARGETS:ROOT_TARGETS
-
-.for _I in ${_REGRESS_DEPRECATED}
-_REGRESS_OLD=REGRESS${_I:C/\:.*//}
-_REGRESS_NEW=REGRESS_${_I:C/.*\://}
-.  if defined(${_REGRESS_OLD})
-ERRORS:= ${ERRORS} "Warning: ${_REGRESS_OLD} is deprecated, use ${_REGRESS_NEW} instead."
-.    if !defined(${_REGRESS_NEW})
-${_REGRESS_NEW}:=${${_REGRESS_OLD}}
-.    endif
-.  endif
-.endfor
-
 # XXX - Need full path to REGRESS_LOG, otherwise there will be much pain.
 REGRESS_LOG?=/dev/null
 REGRESS_SKIP_TARGETS?=
 REGRESS_SKIP_SLOW?=no
 REGRESS_FAIL_EARLY?=no
+
+.if ! ${REGRESS_LOG:M/*}
+ERRORS += "Fatal: REGRESS_LOG=${REGRESS_LOG} is not an absolute path"
+.endif
 
 _REGRESS_NAME=${.CURDIR:S/${BSDSRCDIR}\/regress\///}
 _REGRESS_TMP?=/dev/null
@@ -46,6 +34,7 @@ _REGRESS_OUT= | tee -a ${REGRESS_LOG} ${_REGRESS_TMP} 2>&1 > /dev/null
 .if defined(PROG) && !empty(PROG)
 run-regress-${PROG}: ${PROG}
 	./${PROG}
+.PHONY: run-regress-${PROG}
 .endif
 
 .if defined(PROG) && !defined(REGRESS_TARGETS)
@@ -55,14 +44,14 @@ REGRESS_SKIP_TARGETS=run-regress-${PROG}
 .  endif
 .endif
 
-.if defined(REGRESS_SLOW_TARGETS) && ${REGRESS_SKIP_SLOW} != no
+.if defined(REGRESS_SLOW_TARGETS) && ${REGRESS_SKIP_SLOW:L} != no
 REGRESS_SKIP_TARGETS+=${REGRESS_SLOW_TARGETS}
 .endif
 
-.if ${REGRESS_FAIL_EARLY} != no
-_SKIP_FAIL=
+.if ${REGRESS_FAIL_EARLY:L} != no
+_REGRESS_FAILED = false
 .else
-_SKIP_FAIL=-
+_REGRESS_FAILED = true
 .endif
 
 .if defined(REGRESS_ROOT_TARGETS)
@@ -73,6 +62,63 @@ REGRESS_SKIP_TARGETS+=${REGRESS_ROOT_TARGETS}
 .  endif
 .endif
 
+REGRESS_EXPECTED_FAILURES?=
+REGRESS_SETUP?=
+REGRESS_SETUP_ONCE?=
+REGRESS_CLEANUP?=
+
+.if !empty(REGRESS_SETUP)
+${REGRESS_TARGETS}: ${REGRESS_SETUP}
+.endif
+
+.if !empty(REGRESS_SETUP_ONCE)
+CLEANFILES+=${REGRESS_SETUP_ONCE:S/^/stamp-/}
+${REGRESS_TARGETS}: ${REGRESS_SETUP_ONCE:S/^/stamp-/}
+${REGRESS_SETUP_ONCE:S/^/stamp-/}: .SILENT
+	echo '==== ${@:S/^stamp-//} ===='
+	${MAKE} -C ${.CURDIR} ${@:S/^stamp-//}
+	date >$@
+	echo
+.endif
+
+regress: .SILENT
+.if !empty(REGRESS_SETUP_ONCE)
+	rm -f ${REGRESS_SETUP_ONCE:S/^/stamp-/}
+	${MAKE} -C ${.CURDIR} ${REGRESS_SETUP_ONCE:S/^/stamp-/}
+.endif
+.for RT in ${REGRESS_TARGETS}
+	echo '==== ${RT} ===='
+.  if ${REGRESS_SKIP_TARGETS:M${RT}}
+	echo -n "SKIP " ${_REGRESS_OUT}
+	echo SKIPPED
+.  elif ${REGRESS_EXPECTED_FAILURES:M${RT}}
+	if ${MAKE} -C ${.CURDIR} ${RT}; then \
+	    echo -n "XPASS " ${_REGRESS_OUT} ; \
+	    echo UNEXPECTED_PASS; \
+	    ${_REGRESS_FAILED}; \
+	else \
+	    echo -n "XFAIL " ${_REGRESS_OUT} ; \
+	    echo EXPECTED_FAIL; \
+	fi
+.  else
+	if ${MAKE} -C ${.CURDIR} ${RT}; then \
+	    echo -n "SUCCESS " ${_REGRESS_OUT} ; \
+	else \
+	    echo -n "FAIL " ${_REGRESS_OUT} ; \
+	    echo FAILED ; \
+	    ${_REGRESS_FAILED}; \
+	fi
+.  endif
+	echo ${_REGRESS_NAME}/${RT:S/^run-regress-//} ${_REGRESS_OUT}
+	echo
+.endfor
+.for RT in ${REGRESS_CLEANUP}
+	echo '==== ${RT} ===='
+	${MAKE} -C ${.CURDIR} ${RT}
+	echo
+.endfor
+	rm -f ${REGRESS_SETUP_ONCE:S/^/stamp-/}
+
 .if defined(ERRORS)
 .BEGIN:
 .  for _m in ${ERRORS}
@@ -81,42 +127,6 @@ REGRESS_SKIP_TARGETS+=${REGRESS_ROOT_TARGETS}
 .  if !empty(ERRORS:M"Fatal\:*") || !empty(ERRORS:M'Fatal\:*')
 	@exit 1
 .  endif
-.endif 
-
-regress: .SILENT
-.if ! ${REGRESS_LOG:M/*}
-	echo =========================================================
-	echo REGRESS_LOG must contain an absolute path to the log-file.
-	echo It currently points to: ${REGRESS_LOG}
-	echo =========================================================
-	exit 1
 .endif
-.for RT in ${REGRESS_TARGETS} 
-.  if ${REGRESS_SKIP_TARGETS:M${RT}}
-	@echo -n "SKIP " ${_REGRESS_OUT}
-.  else
-# XXX - we need a better method to see if a test fails due to timeout or just
-#       normal failure.
-.   if !defined(REGRESS_MAXTIME)
-	${_SKIP_FAIL}if cd ${.CURDIR} && ${MAKE} ${RT}; then \
-	    echo -n "SUCCESS " ${_REGRESS_OUT} ; \
-	else \
-	    echo -n "FAIL " ${_REGRESS_OUT} ; \
-	    echo FAILED ; \
-	    false; \
-	fi
-.   else
-	${_SKIP_FAIL}if cd ${.CURDIR} && \
-	    (ulimit -t ${REGRESS_MAXTIME} ; ${MAKE} ${RT}); then \
-	    echo -n "SUCCESS " ${_REGRESS_OUT} ; \
-	else \
-	    echo -n "FAIL (possible timeout) " ${_REGRESS_OUT} ; \
-	    echo FAILED ; \
-	    false; \
-	fi
-.   endif
-.  endif
-	@echo ${_REGRESS_NAME}/${RT:S/^run-regress-//} ${_REGRESS_OUT}
-.endfor
 
 .PHONY: regress

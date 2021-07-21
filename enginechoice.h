@@ -1,9 +1,9 @@
-#ifndef MAIN_H
-#define MAIN_H
-/*	$OpenBSD: main.h,v 1.6 2020/01/13 14:51:50 espie Exp $ */
+#ifndef ENGINECHOICE_H
+#define ENGINECHOICE_H
 
+/*	$OpenBSD: enginechoice.h,v 1.2 2021/03/04 09:32:49 espie Exp $ */
 /*
- * Copyright (c) 2001 Marc Espie.
+ * Copyright (c) 2020 Marc Espie.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +26,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/* main
- *	User interface to make.
- */
-/* Main_ParseArgLine(string);
- *	Parse string as a line of arguments, and treats them as if they
- *	were given at make's invocation. Used to implement .MFLAGS. */
-extern void Main_ParseArgLine(const char *);
-
-/* List of target names given on the command line. Needed to resolve
- * .if make(...) statements. */
-extern Lst	create;
-
-/* set_notparallel(): used to influence running mode from parse.c */
-extern void set_notparallel(void);
+extern void engine_run_list(Lst, bool *, bool *);
+extern void engine_node_updated(GNode *);
+extern void choose_engine(bool);
 
 #endif

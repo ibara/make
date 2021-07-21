@@ -25,6 +25,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <portable.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,8 +37,6 @@
 #include "cond_int.h"
 #include "var_int.h"
 #include "node_int.h"
-
-#include "portable.h"
 
 #define M(x)	x, #x
 char *table_var[] = {

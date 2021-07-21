@@ -28,6 +28,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <time.h>
+
 /* This module handles time stamps on files in a relatively high-level way.
  * Most of the interface is achieved through inlineable code.
  *
@@ -52,7 +54,7 @@
 #define ts_set_from_stat(s, t) \
 do { \
 	(t).tv_sec = (s).st_mtime; \
-	(t).tv_nsec = 0; \
+	(t).tv_nsec = (s).st_mtimensec; \
 	if (is_out_of_date(t)) \
 		(t).tv_nsec++; \
 } while (0)

@@ -1,7 +1,7 @@
 #ifndef _JOB_H_
 #define _JOB_H_
 
-/*	$OpenBSD: job.h,v 1.31 2012/12/14 11:10:03 espie Exp $	*/
+/*	$OpenBSD: job.h,v 1.38 2020/06/03 12:41:39 espie Exp $	*/
 /*	$NetBSD: job.h,v 1.5 1996/11/06 17:59:10 christos Exp $ */
 
 /*
@@ -54,6 +54,9 @@ extern void Job_Make(GNode *);
  */
 extern void Job_Init(int);
 
+/* save signal mask at start */
+extern void Sigset_Init(void);
+
 /* interface with the normal build in make.c */
 /* okay = can_start_job();
  *	can we run new jobs right now ?
@@ -65,16 +68,6 @@ extern bool can_start_job(void);
  */
 extern bool Job_Empty(void);
 
-/* errors = Job_Finish();
- *	final processing including running .END target if no errors.
- */
-extern bool Job_Finish(void);
-
-/* Job_Begin();
- *	similarly, run .BEGIN job at start of job.
- */
-extern void Job_Begin(void);
-
 extern void Job_Wait(void);
 extern void Job_AbortAll(void);
 extern void print_errors(void);
@@ -84,6 +77,11 @@ extern void print_errors(void);
  *	or a signal coming in.
  */
 extern void handle_running_jobs(void);
+/* loop_handle_running_jobs();
+ *	handle running jobs until they're finished.
+ */
+extern void loop_handle_running_jobs(void);
+extern void reset_signal_mask(void);
 
 /* handle_all_signals();
  *	if a signal was received, react accordingly.
@@ -93,11 +91,13 @@ extern void handle_running_jobs(void);
 extern void handle_all_signals(void);
 
 extern void determine_expensive_job(Job *);
-extern Job *runningJobs, *errorJobs;
+extern Job *runningJobs, *errorJobs, *availableJobs;
 extern void debug_job_printf(const char *, ...);
 extern void handle_one_job(Job *);
 extern int check_dying_signal(void);
 
 extern const char *basedirectory;
+
+extern bool	sequential;	/* True if we are running one single-job */
 
 #endif /* _JOB_H_ */

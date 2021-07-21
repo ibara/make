@@ -1,7 +1,7 @@
 #ifndef _BUF_H
 #define _BUF_H
 
-/*	$OpenBSD: buf.h,v 1.22 2012/11/07 14:18:41 espie Exp $	*/
+/*	$OpenBSD: buf.h,v 1.24 2020/01/13 13:54:44 espie Exp $	*/
 /*	$NetBSD: buf.h,v 1.7 1996/12/31 17:53:22 christos Exp $ */
 
 /*
@@ -85,7 +85,7 @@ typedef struct Buffer_ {
 } BUFFER;
 
 /* Internal support for Buf_AddChar.  */
-extern void BufOverflow(Buffer);
+extern void BufExpand(Buffer, size_t);
 
 
 /* User interface */
@@ -106,6 +106,9 @@ extern void Buf_AddChars(Buffer, size_t, const char *);
  *	Initializes a buffer, to hold approximately init chars.
  *	Set init to 0 if you have no idea.  */
 extern void Buf_Init(Buffer, size_t);
+/* Buf_Reinit(buf, init);
+ *	Initializes/reset a static buffer */
+extern void Buf_Reinit(Buffer, size_t);
 /* Buf_Destroy(buf);
  * 	Nukes a buffer and all its resources.	*/
 #define Buf_Destroy(bp) ((void)free((bp)->buffer))
@@ -117,7 +120,7 @@ extern void Buf_Init(Buffer, size_t);
 #define Buf_AddChar(bp, byte)			\
 do {						\
 	if ((bp)->endPtr - (bp)->inPtr <= 1)	\
-	    BufOverflow(bp);			\
+	    BufExpand(bp, 1);			\
 	*(bp)->inPtr++ = (byte);		\
 } while (0)
 
