@@ -35,7 +35,7 @@ char *__progname;
 #endif
 
 #ifdef NEED_SYS_SIGNAME
-extern const char *const sys_signame[_NSIG];
+extern const char *const sys_signame[];
 #endif
 
 #ifndef SIGINFO

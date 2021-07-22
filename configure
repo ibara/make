@@ -259,9 +259,10 @@ CFLAGS+=$DNA $DNF $DNP $DNR $DNS $DNSTN
 
 PROG=	$omake
 OBJS=	arch.o buf.o cmd_exec.o compat.o cond.o dir.o direxpand.o dump.o \\
-	engine.o error.o for.o init.o job.o lowparse.o main.o make.o \\
-	memory.o ohash.o parse.o parsevar.o portable.o str.o stats.o suff.o \\
-	targ.o targequiv.o timestamp.o var.o varmodifiers.o varname.o \\
+	engine.o enginechoice.o error.o expandchildren.o for.o init.o job.o \\
+	lowparse.o main.o make.o memory.o ohash.o parse.o parsevar.o \\
+	portable.o str.o stats.o suff.o targ.o targequiv.o timestamp.o var.o \\
+	varmodifiers.o varname.o \\
 	lstAddNew.o lstAppend.o lstConcat.o lstConcatDestroy.o lstDeQueue.o \\
 	lstDestroy.o lstDupl.o lstFindFrom.o lstForEachFrom.o lstInsert.o \\
 	lstMember.o lstRemove.o lstReplace.o lstRequeue.o lstSucc.o
