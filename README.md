@@ -23,6 +23,19 @@ $ make
 # make install
 ```
 
+Working compilers
+-----------------
+The following compilers are known to build `make`:
+* Clang
+* GCC
+* PCC
+* TinyCC
+* CParser
+* CompCert
+* lacc
+
+It is likely that any C99 compiler will work.
+
 Testing
 -------
 Tested on Linux and Mac OS X using TravisCI. *BSD, Cygwin, AIX, and Solaris

@@ -267,6 +267,8 @@ OBJS=	arch.o buf.o cmd_exec.o compat.o cond.o dir.o direxpand.o dump.o \\
 	lstDestroy.o lstDupl.o lstFindFrom.o lstForEachFrom.o lstInsert.o \\
 	lstMember.o lstRemove.o lstReplace.o lstRequeue.o lstSucc.o
 
+GENOBJS=generate.o stats.o memory.o ohash.o portable.o
+
 all: generate varhashconsts.h condhashconsts.h nodehashconsts.h \${OBJS}
 	\${CC} \${LDFLAGS} -o \${PROG} \${OBJS}
 
@@ -305,8 +307,8 @@ condhashconsts.h:
 nodehashconsts.h:
 	./generate 3 0 >\$@.tmp && mv \$@.tmp \$@
 
-generate:
-	\${CC} \${CFLAGS} \${LDFLAGS} -o \$@ generate.c stats.c memory.c ohash.c portable.c
+generate: \${GENOBJS}
+	\${CC} \${CFLAGS} \${LDFLAGS} -o \$@ \${GENOBJS}
 
 CKOBJS=	regress.o str.o memory.o buf.o ohash.o portable.o
 
@@ -319,7 +321,7 @@ regress: check
 test: regress
 
 clean:
-	rm -f \${PROG} \${OBJS} generate varhashconsts.h condhashconsts.h nodehashconsts.h check \${CKOBJS}
+	rm -f \${PROG} \${OBJS} generate varhashconsts.h condhashconsts.h nodehashconsts.h check \${CKOBJS} \${GENOBJS}
 
 distclean: clean
 	rm -f Makefile
