@@ -129,7 +129,7 @@ static volatile sig_atomic_t got_fatal;
 static volatile sig_atomic_t got_SIGINT, got_SIGHUP, got_SIGQUIT, got_SIGTERM, 
     got_SIGINFO;
 
-static sigset_t sigset, emptyset, origset;
+static sigset_t omake_sigset, emptyset, origset;
 
 static void handle_fatal_signal(int);
 static void handle_siginfo(void);
@@ -342,7 +342,7 @@ setup_signal(int sig)
 {
 	if (signal(sig, SIG_IGN) != SIG_IGN) {
 		(void)signal(sig, notice_signal);
-		sigaddset(&sigset, sig);
+		sigaddset(&omake_sigset, sig);
 	}
 }
 
@@ -385,7 +385,7 @@ Sigset_Init()
 static void
 setup_all_signals(void)
 {
-	sigemptyset(&sigset);
+	sigemptyset(&omake_sigset);
 	/*
 	 * Catch the four signals that POSIX specifies if they aren't ignored.
 	 * handle_signal will take care of calling JobInterrupt if appropriate.
@@ -790,7 +790,7 @@ handle_running_jobs(void)
 	/* first, we make sure to hold on new signals, to synchronize
 	 * reception of new stuff on sigsuspend
 	 */
-	sigprocmask(SIG_BLOCK, &sigset, NULL);
+	sigprocmask(SIG_BLOCK, &omake_sigset, NULL);
 	/* note this will NOT loop until runningJobs == NULL.
 	 * It's merely an optimisation, namely that we don't need to go 
 	 * through the logic if no job is present. As soon as a job 
@@ -897,7 +897,7 @@ handle_fatal_signal(int signo)
 	internal_print_errors();
 
 	/* die by that signal */
-	sigprocmask(SIG_BLOCK, &sigset, NULL);
+	sigprocmask(SIG_BLOCK, &omake_sigset, NULL);
 	signal(signo, SIG_DFL);
 	kill(getpid(), signo);
 	sigprocmask(SIG_SETMASK, &emptyset, NULL);
