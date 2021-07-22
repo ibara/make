@@ -38,8 +38,6 @@
 /location.h/1.1/Thu Jul 22 13:38:33 2021//
 /lowparse.c/1.35/Thu Jul 22 13:38:33 2021//
 /lowparse.h/1.11/Thu Jul 22 13:38:33 2021//
-/lst.h/1.33/Thu Jul 22 13:38:44 2021//
-/lst_t.h/1.3/Thu Jul 22 13:38:33 2021//
 /main.c/1.127/Result of merge//
 /main.h/1.6/Thu Jul 22 13:38:44 2021//
 /make.1/1.133/Thu Jul 22 13:38:44 2021//
@@ -72,8 +70,10 @@
 /varmodifiers.h/1.12/Thu Jul 22 13:38:33 2021//
 /varname.c/1.6/Thu Jul 22 13:38:33 2021//
 /varname.h/1.4/Thu Jul 22 13:38:33 2021//
-D/PSD.doc////
-D/lst.lib////
 /targ.h/1.15/Thu Jul 22 13:41:12 2021//
 /job.c/1.162/Thu Jul 22 13:42:18 2021//
 /Makefile/1.64/Thu Jul 22 13:42:34 2021//
+D/PSD.doc////
+D/lst.lib////
+/lst.h/1.33/Thu Jul 22 14:06:58 2021//
+/lst_t.h/1.3/Thu Jul 22 14:07:39 2021//

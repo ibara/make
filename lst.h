@@ -1,7 +1,7 @@
 #ifndef _LST_H_
 #define _LST_H_
 
-/*	$OpenBSD: lst.h,v 1.2 2015/10/14 13:52:11 espie Exp $ */
+/*	$OpenBSD: lst.h,v 1.33 2021/03/04 09:45:31 espie Exp $ */
 /*	$NetBSD: lst.h,v 1.7 1996/11/06 17:59:12 christos Exp $ */
 
 /*
@@ -59,8 +59,8 @@ struct ListNode_ {
 #endif
 
 typedef void (*SimpleProc)(void *);
-typedef int (*FindProc)(void *, void *);
-typedef int (*FindProcConst)(void *, const void *);
+typedef bool (*FindProc)(void *, void *);
+typedef bool (*FindProcConst)(void *, const void *);
 typedef void (*ForEachProc)(void *, void *);
 typedef void *(*DuplicateProc)(void *);
 
@@ -82,6 +82,11 @@ typedef void *(*DuplicateProc)(void *);
 
 /* Duplicate an existing list */
 extern Lst		Lst_Clone(Lst, Lst, DuplicateProc);
+
+/* XXX: Lst_Destroy only destroys the list contents, which is appropriate
+ * as most use-cases are temporary lists.
+ * In case of a permanent list, Lst_Init must also be called !
+ */
 /* Destroy an old one */
 extern void		Lst_Destroy(LIST *, SimpleProc);
 /* True if list is empty */
