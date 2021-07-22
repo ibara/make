@@ -30,10 +30,6 @@ long long strtonum(const char *, long long, long long, const char **);
 char *__progname;
 #endif
 
-#ifndef __only_inline
-#define __only_inline
-#endif
-
 #ifndef _NSIG
 #define _NSIG 33
 #endif

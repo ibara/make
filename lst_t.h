@@ -1,4 +1,4 @@
-/*	$OpenBSD: lst_t.h,v 1.3 2010/07/19 19:46:44 espie Exp $ */
+/*	$OpenBSD: lst_t.h,v 1.1 2014/05/12 19:11:20 espie Exp $ */
 
 /*
  * Copyright (c) 2001 Marc Espie.

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cond.c,v 1.51 2016/10/21 16:12:38 espie Exp $	*/
+/*	$OpenBSD: cond.c,v 1.54 2019/12/21 15:29:25 espie Exp $	*/
 /*	$NetBSD: cond.c,v 1.7 1996/11/06 17:59:02 christos Exp $	*/
 
 /*
@@ -260,7 +260,9 @@ CondDoDefined(struct Name *arg)
  *	Handle the 'make' function for conditionals.
  *
  * Results:
- *	true if the given target is being made.
+ *	true if the given target is currently being built,
+ *	either explicitly on the command line, or implicitly as the
+ *	default target.
  *-----------------------------------------------------------------------
  */
 static bool
@@ -291,6 +293,9 @@ CondDoExists(struct Name *arg)
 {
 	bool result;
 	char *path;
+
+	if (arg->s == arg->e)
+		Parse_Error(PARSE_FATAL, "Empty file name in .if exists()");
 
 	path = Dir_FindFilei(arg->s, arg->e, defaultPath);
 	if (path != NULL) {
@@ -395,7 +400,7 @@ CondHandleNumber(bool doEval)
 	char *lhs;
 
 	end = condExpr;
-	while (!ISSPACE(*end) && strchr("!=><", *end) == NULL)
+	while (*end != '\0' && !ISSPACE(*end) && strchr("!=><", *end) == NULL)
 		end++;
 	lhs = Str_dupi(condExpr, end);
 	condExpr = end;
@@ -418,7 +423,7 @@ CondHandleVarSpec(bool doEval)
 		return Err;
 	condExpr += varSpecLen;
 
-	if (!ISSPACE(*condExpr) &&
+	if (*condExpr && !ISSPACE(*condExpr) &&
 		strchr("!=><", *condExpr) == NULL) {
 		BUFFER buf;
 

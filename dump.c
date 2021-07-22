@@ -1,4 +1,4 @@
-/* $OpenBSD: dump.c,v 1.9 2016/10/21 16:12:38 espie Exp $ */
+/* $OpenBSD: dump.c,v 1.12 2020/01/26 12:41:21 espie Exp $ */
 /*
  * Copyright (c) 2012 Marc Espie.
  *
@@ -104,7 +104,7 @@ TargPrintNode(GNode *gn, bool full)
 {
 	if (OP_NOP(gn->type))
 		return;
-	switch((gn->special & SPECIAL_MASK)) {
+	switch(gn->special) {
 	case SPECIAL_SUFFIXES:
 	case SPECIAL_PHONY:
 	case SPECIAL_ORDER:
@@ -116,8 +116,8 @@ TargPrintNode(GNode *gn, bool full)
 		break;
 	}
 	if (full) {
-		printf("# %d unmade prerequisites\n", gn->unmade);
-		if (! (gn->type & (OP_JOIN|OP_USE|OP_EXEC))) {
+		printf("# %d unmade prerequisites\n", gn->children_left);
+		if (! (gn->type & OP_USE)) {
 			if (!is_out_of_date(gn->mtime)) {
 				printf("# last modified %s: %s\n",
 				      time_to_string(&gn->mtime),

@@ -1,4 +1,4 @@
-/*	$OpenBSD: var.c,v 1.101 2016/10/23 14:54:14 espie Exp $	*/
+/*	$OpenBSD: var.c,v 1.103 2019/12/22 09:26:23 espie Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -221,7 +221,7 @@ typedef struct Var_ {
 #define VAR_FROM_CMD	4	/* Special source: command line */
 #define VAR_FROM_ENV	8	/* Special source: environment */
 #define VAR_SEEN_ENV	16	/* No need to go look up environment again */
-#define VAR_SHELL	32	/* Magic behavior */
+#define VAR_IS_SHELL	32	/* Magic behavior */
 
 #define POISONS (POISON_NORMAL | POISON_EMPTY | POISON_NOT_DEFINED)
 				/* Defined in var.h */
@@ -574,7 +574,7 @@ Var_Mark(const char *name, const char *ename, unsigned int type)
 	}
 }
 
-/* Check if there's any reason not to use the variable in this context.
+/* Check if there's any reason not to use this variable.
  */
 static void
 poison_check(Var *v)
@@ -627,7 +627,7 @@ Var_Deletei(const char *name, const char *ename)
 	delete_var(v);
 }
 
-/* Set or add a global variable, in VAR_CMD or VAR_GLOBAL context.
+/* Set or add a global variable, either to VAR_CMD or VAR_GLOBAL.
  */
 static void
 var_set_append(const char *name, const char *ename, const char *val, int ctxt,
@@ -652,7 +652,7 @@ var_set_append(const char *name, const char *ename, const char *val, int ctxt,
 	if (ctxt == VAR_CMD) {	/* always for command line */
 		(append ? var_append_value : var_set_value)(v, val);
 		v->flags |= VAR_FROM_CMD;
-		if ((v->flags & VAR_SHELL) == 0) {
+		if ((v->flags & VAR_IS_SHELL) == 0) {
 			/* Any variables given on the command line are
 			 * automatically exported to the environment,
 			 * except for SHELL (as per POSIX standard).
@@ -1029,7 +1029,7 @@ Var_Parse(const char *str,	/* The string to parse */
 	if (val == NULL) {
 		val = err ? var_Error : varNoError;
 		/* If it comes from a dynamic source, and it doesn't have
-		 * a context, copy the spec instead.
+		 * a local context, copy the spec instead.
 		 * Specifically, this make allows constructs like:
 		 * 	target.o: $*.c
 		 * Absence of a context means "parsing". But these can't
@@ -1333,7 +1333,7 @@ set_magic_shell_variable()
 	v = find_global_var_without_env(name, ename, k);
 	var_set_value(v, _PATH_BSHELL);
 	/* XXX the environment shall never affect it */
-	v->flags = VAR_SHELL | VAR_SEEN_ENV;
+	v->flags = VAR_IS_SHELL | VAR_SEEN_ENV;
 }
 
 /*

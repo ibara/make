@@ -1,4 +1,4 @@
-/*	$OpenBSD: varmodifiers.c,v 1.44 2016/10/02 17:42:31 tb Exp $	*/
+/*	$OpenBSD: varmodifiers.c,v 1.48 2020/08/30 12:16:04 tb Exp $	*/
 /*	$NetBSD: var.c,v 1.18 1997/03/18 19:24:46 christos Exp $	*/
 
 /*
@@ -603,29 +603,48 @@ get_sysvpattern(const char **p, SymTable *ctxt UNUSED, bool err, int endc)
 {
 	VarPattern		*pattern;
 	const char		*cp, *cp2;
-	BUFFER buf;
+	BUFFER buf, buf2;
 	int cnt = 0;
 	char startc = endc == ')' ? '(' : '{';
+
+	Buf_Init(&buf, 0);
 	for (cp = *p;; cp++) {
 		if (*cp == '=' && cnt == 0)
 			break;
-		if (*cp == '\0')
+		if (*cp == '\0') {
+			Buf_Destroy(&buf);
 			return NULL;
+		}
 		if (*cp == startc)
 			cnt++;
 		else if (*cp == endc) {
 			cnt--;
-			if (cnt < 0)
+			if (cnt < 0) {
+				Buf_Destroy(&buf);
 				return NULL;
+			}
+		} else if (*cp == '$') {
+			if (cp[1] == '$')
+				cp++;
+			else {
+				size_t len;
+				(void)Var_ParseBuffer(&buf, cp, ctxt, err, 
+				    &len);
+				cp += len - 1;
+				continue;
+			}
 		}
+		Buf_AddChar(&buf, *cp);
 	}
-	Buf_Init(&buf, 0);
+
+	Buf_Init(&buf2, 0);
 	for (cp2 = cp+1;; cp2++) {
 		if (((*cp2 == ':' && cp2[1] != endc) || *cp2 == endc) && 
 		    cnt == 0)
 			break;
 		if (*cp2 == '\0') {
 			Buf_Destroy(&buf);
+			Buf_Destroy(&buf2);
 			return NULL;
 		}
 		if (*cp2 == startc)
@@ -634,6 +653,7 @@ get_sysvpattern(const char **p, SymTable *ctxt UNUSED, bool err, int endc)
 			cnt--;
 			if (cnt < 0) {
 				Buf_Destroy(&buf);
+				Buf_Destroy(&buf2);
 				return NULL;
 			}
 		} else if (*cp2 == '$') {
@@ -641,20 +661,20 @@ get_sysvpattern(const char **p, SymTable *ctxt UNUSED, bool err, int endc)
 				cp2++;
 			else {
 				size_t len;
-				(void)Var_ParseBuffer(&buf, cp2, ctxt, err, 
+				(void)Var_ParseBuffer(&buf2, cp2, ctxt, err, 
 				    &len);
 				cp2 += len - 1;
 				continue;
 			}
 		}
-		Buf_AddChar(&buf, *cp2);
+		Buf_AddChar(&buf2, *cp2);
 	}
 
 	pattern = emalloc(sizeof(VarPattern));
-	pattern->lbuffer = pattern->lhs = Str_dupi(*p, cp);
-	pattern->leftLen = cp - *p;
-	pattern->rhs = Buf_Retrieve(&buf);
-	pattern->rightLen = Buf_Size(&buf);
+	pattern->lbuffer = pattern->lhs = Buf_Retrieve(&buf);
+	pattern->leftLen = Buf_Size(&buf);
+	pattern->rhs = Buf_Retrieve(&buf2);
+	pattern->rightLen = Buf_Size(&buf2);
 	pattern->flags = 0;
 	*p = cp2;
 	return pattern;
@@ -876,7 +896,7 @@ VarRESubstitute(struct Name *word, bool addSpace, Buffer buf, void *patternp)
 					rp++;
 				}
 
-				if (n > pat->nsub) {
+				if (n >= pat->nsub) {
 					Error("No subexpression %s",
 					    &errstr[0]);
 					subbuf = "";
@@ -1195,21 +1215,7 @@ get_patternarg(const char **p, SymTable *ctxt, bool err, int endc)
 static void *
 get_spatternarg(const char **p, SymTable *ctxt, bool err, int endc)
 {
-	VarPattern *pattern;
-
-	pattern = common_get_patternarg(p, ctxt, err, endc, true);
-	if (pattern != NULL && pattern->leftLen > 0) {
-		if (pattern->lhs[pattern->leftLen-1] == '$') {
-			    pattern->leftLen--;
-			    pattern->flags |= VAR_MATCH_END;
-		}
-		if (pattern->lhs[0] == '^') {
-			    pattern->lhs++;
-			    pattern->leftLen--;
-			    pattern->flags |= VAR_MATCH_START;
-		}
-	}
-	return pattern;
+	return common_get_patternarg(p, ctxt, err, endc, true);
 }
 
 static void
@@ -1284,6 +1290,17 @@ common_get_patternarg(const char **p, SymTable *ctxt, bool err, int endc,
 	    &pattern->leftLen, NULL);
 	pattern->lbuffer = pattern->lhs;
 	if (pattern->lhs != NULL) {
+		if (dosubst && pattern->leftLen > 0) {
+			if (pattern->lhs[pattern->leftLen-1] == '$') {
+				    pattern->leftLen--;
+				    pattern->flags |= VAR_MATCH_END;
+			}
+			if (pattern->lhs[0] == '^') {
+				    pattern->lhs++;
+				    pattern->leftLen--;
+				    pattern->flags |= VAR_MATCH_START;
+			}
+		}
 		pattern->rhs = VarGetPattern(ctxt, err, &s, delim, delim,
 		    &pattern->rightLen, dosubst ? pattern: NULL);
 		if (pattern->rhs != NULL) {
@@ -1497,7 +1514,7 @@ VarModifiers_Apply(char *str, const struct Name *name, SymTable *ctxt,
 		} else {
 			Error("Bad modifier: %s", tstr);
 			/* Try skipping to end of var... */
-			for (tstr++; *tstr != endc && *tstr != '\0';)
+			while (*tstr != endc && *tstr != '\0')
 				tstr++;
 			if (str != NULL && *freePtr)
 				free(str);
