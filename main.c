@@ -604,6 +604,16 @@ read_all_make_rules(bool noBuiltins, bool read_depend,
     Lst makefiles, struct dirs *d)
 {
 	/*
+	 * Dir_Expand is a macro that needs its first parameter
+	 * to point to a constant location.
+	 * This isn't always the case for compilers like tinycc that
+	 * don't guarantee same string constants to point to a single address,
+	 * and _PATH_DEFSYSMK != _PATH_DEFSYSMK.
+	 * Assign it to a variable. to pin it down.
+	 */
+	char* defsysmk = _PATH_DEFSYSMK;
+
+	/*
 	 * Read in the built-in rules first, followed by the specified
 	 * makefile(s), or the default Makefile or makefile, in that order.
 	 */
@@ -611,9 +621,9 @@ read_all_make_rules(bool noBuiltins, bool read_depend,
 		LIST sysMkPath; 		/* Path of sys.mk */
 
 		Lst_Init(&sysMkPath);
-		Dir_Expand(_PATH_DEFSYSMK, systemIncludePath, &sysMkPath);
+		Dir_Expand(defsysmk, systemIncludePath, &sysMkPath);
 		if (Lst_IsEmpty(&sysMkPath))
-			Fatal("make: no system rules (%s).", _PATH_DEFSYSMK);
+			Fatal("make: no system rules (%s).", defsysmk);
 
 		read_makefile_list(&sysMkPath, d);
 	}
