@@ -31,6 +31,9 @@
 #include "defines.h"
 #include "timestamp.h"
 
+#ifdef HAS_TIME_H
+#include <time.h>
+#endif
 
 struct timespec starttime;
 

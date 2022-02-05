@@ -1,0 +1,8 @@
+*~
+*.o
+/Makefile
+/condhashconsts.h
+/generate
+/nodehashconsts.h
+/varhashconsts.h
+/omake

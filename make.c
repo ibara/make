@@ -82,6 +82,11 @@
 #include "targequiv.h"
 #include "garray.h"
 #include "memory.h"
+#include "arc4random-local.h"
+
+#ifdef HAS_TIME_H
+#include <time.h>
+#endif
 
 /* what gets added each time. Kept as one static array so that it doesn't
  * get resized every time.
