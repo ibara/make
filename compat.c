@@ -56,6 +56,10 @@
 #include "timestamp.h"
 #include "lst.h"
 
+#ifdef HAS_TIME_H
+#include <time.h>
+#endif
+
 static void CompatMake(void *, void *);
 
 /*-

@@ -108,6 +108,12 @@
 #include "buf.h"
 #include "enginechoice.h"
 
+#ifdef __linux__
+#ifndef WAIT_ANY
+#define WAIT_ANY ((pid_t)-1)
+#endif
+#endif
+
 static int	aborting = 0;	    /* why is the make aborting? */
 #define ABORT_ERROR	1	    /* Because of an error */
 #define ABORT_INTERRUPT 2	    /* Because it was interrupted */

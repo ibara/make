@@ -92,6 +92,7 @@
 #include "buf.h"
 #include "job.h"
 #include "lowparse.h"
+#include "arc4random-local.h"
 
 static void MakeTimeStamp(void *, void *);
 static int rewrite_time(const char *);

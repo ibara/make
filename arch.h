@@ -34,6 +34,10 @@
 
 #include <sys/time.h>
 
+#ifdef HAS_TIME_H
+#include <time.h>
+#endif
+
 /* Initialization and cleanup */
 extern void Arch_Init(void);
 
